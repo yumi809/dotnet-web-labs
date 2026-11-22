@@ -42,6 +42,10 @@ public sealed class OrderService(IUnitOfWork uow, IMapper mapper, ILogger<OrderS
     /// </summary>
     public async Task<OrderDto> CreateAsync(CreateOrderDto dto, string user, CancellationToken ct)
     {
+        using var activity = OrdersTelemetry.ActivitySource.StartActivity("orders.create");
+        activity?.SetTag("customer.id", dto.CustomerId);
+        activity?.SetTag("order.items_count", dto.Items.Count);
+
         // Бізнес-правила, що потребують стану БД
         var duplicates = dto.Items.GroupBy(i => i.ProductId).Where(g => g.Count() > 1).Select(g => g.Key).ToArray();
         if (duplicates.Length > 0)
@@ -91,13 +95,15 @@ public sealed class OrderService(IUnitOfWork uow, IMapper mapper, ILogger<OrderS
             }, ct);
 
             await uow.CommitAsync(ct);
+            activity?.SetTag("order.id", order.Id);
             logger.LogInformation("Order {OrderId} ({OrderNumber}) created for customer {CustomerId} with {ItemsCount} items",
                 order.Id, order.OrderNumber, order.CustomerId, dto.Items.Count);
 
             return await GetAsync(order.Id, ct);
         }
-        catch
+        catch (Exception ex)
         {
+            activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
             await uow.RollbackAsync(CancellationToken.None);
             throw;
         }
@@ -135,6 +141,9 @@ public sealed class OrderService(IUnitOfWork uow, IMapper mapper, ILogger<OrderS
 
     public async Task<OrderDto> ChangeStatusAsync(long orderId, ChangeOrderStatusDto dto, string user, CancellationToken ct)
     {
+        using var activity = OrdersTelemetry.ActivitySource.StartActivity("orders.change_status");
+        activity?.SetTag("order.id", orderId);
+        activity?.SetTag("order.status.to", dto.Status);
         var order = await uow.Orders.GetByIdAsync(orderId, ct) ?? throw new NotFoundException(nameof(Order), orderId);
         if (!OrderStatus.CanTransition(order.Status, dto.Status))
             throw new BusinessConflictException($"Invalid status transition {order.Status} -> {dto.Status}");

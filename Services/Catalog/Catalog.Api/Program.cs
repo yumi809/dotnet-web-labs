@@ -4,15 +4,11 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Serilog: структуровані логи, конфігурація з appsettings (sink Console, enrich FromLogContext/MachineName),
-// команди EF Core логуються категорією Microsoft.EntityFrameworkCore.Database.Command
-builder.Host.UseSerilog((context, services, logger) => logger
-    .ReadFrom.Configuration(context.Configuration)
-    .ReadFrom.Services(services)
-    .Enrich.FromLogContext()
-    .Enrich.WithProperty("Service", "catalog-api"));
+// ServiceDefaults: Serilog (структуровані логи, enrich, sink Console/Compact JSON, команди EF Core),
+// OpenTelemetry, CorrelationId, service discovery, resilience, health checks
+builder.AddServiceDefaults();
 
-builder.Services.AddCatalogBll(builder.Configuration);
+builder.Services.AddCatalogBll(builder.Configuration); // ConnectionStrings:CatalogDb з AppHost
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
@@ -21,10 +17,11 @@ builder.Services.AddSwaggerGen(o => o.SwaggerDoc("v1", new() { Title = "Catalog 
 
 var app = builder.Build();
 
-app.UseExceptionHandler();
-app.UseStatusCodePages();
+app.UseServiceDefaults();
 app.UseSerilogRequestLogging(o =>
     o.EnrichDiagnosticContext = (diag, http) => diag.Set("ClientIp", http.Connection.RemoteIpAddress?.ToString()));
+app.UseExceptionHandler();
+app.UseStatusCodePages();
 
 // MigrateAsync + програмний сідінг; сідінг вимикається в production через Catalog:SeedData=false
 await app.Services.InitializeCatalogDatabaseAsync(app.Configuration.GetValue("Catalog:SeedData", app.Environment.IsDevelopment()));
@@ -36,4 +33,5 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapDefaultEndpoints();
 app.Run();

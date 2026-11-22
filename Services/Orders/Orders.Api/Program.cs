@@ -1,13 +1,13 @@
 using Orders.Api.Infrastructure;
 using Orders.Bll;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Логування (консоль + рівні з appsettings)
-builder.Logging.ClearProviders();
-builder.Logging.AddSimpleConsole(o => { o.IncludeScopes = true; o.TimestampFormat = "HH:mm:ss "; });
+// Serilog, OpenTelemetry, CorrelationId, service discovery, resilience, health checks
+builder.AddServiceDefaults();
 
-// BLL + DAL: Unit of Work і сервіси — Scoped; рядок підключення ConnectionStrings:OrdersDb
+// BLL + DAL: Unit of Work і сервіси — Scoped; рядок підключення ConnectionStrings:OrdersDb (з AppHost)
 builder.Services.AddOrdersBll();
 
 builder.Services.AddControllers();
@@ -18,6 +18,8 @@ builder.Services.AddSwaggerGen(o => o.SwaggerDoc("v1", new() { Title = "Orders A
 
 var app = builder.Build();
 
+app.UseServiceDefaults();          // X-Correlation-Id → LogContext
+app.UseSerilogRequestLogging();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 
@@ -31,4 +33,5 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapDefaultEndpoints();
 app.Run();

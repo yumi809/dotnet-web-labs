@@ -19,6 +19,9 @@ public sealed class CreateReviewHandler(IReviewRepository repository, ILogger<Cr
 {
     public async Task<string> Handle(CreateReviewCommand c, CancellationToken ct)
     {
+        using var activity = ReviewsTelemetry.ActivitySource.StartActivity("reviews.create");
+        activity?.SetTag("product.id", c.ProductId);
+        activity?.SetTag("review.rating", c.Rating);
         var review = new Review(
             new ProductRef(c.ProductId, c.ProductName),
             new AuthorInfo(c.AuthorId, c.AuthorName),

@@ -47,6 +47,8 @@ public sealed class ProductService(
 
     public async Task<ProductDto> CreateAsync(CreateProductDto dto, CancellationToken ct)
     {
+        using var activity = CatalogTelemetry.ActivitySource.StartActivity("catalog.product.create");
+        activity?.SetTag("product.sku", dto.Sku);
         await createValidator.ValidateAndThrowAsync(dto, ct);
 
         // Правила, що потребують БД
@@ -69,6 +71,8 @@ public sealed class ProductService(
 
     public async Task<ProductDto> UpdateAsync(long id, UpdateProductDto dto, CancellationToken ct)
     {
+        using var activity = CatalogTelemetry.ActivitySource.StartActivity("catalog.product.update");
+        activity?.SetTag("product.id", id);
         await updateValidator.ValidateAndThrowAsync(dto, ct);
         var product = await uow.Products.GetByIdAsync(id, ct) ?? throw new NotFoundException(nameof(Product), id);
         if (product.PublisherId != dto.PublisherId)
