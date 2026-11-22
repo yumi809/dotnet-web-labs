@@ -1,0 +1,12 @@
+﻿<Project Sdk="Aspire.AppHost.Sdk/13.6.5">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UserSecretsId>bookhub-apphost-7f3c2a11</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.SqlServer" Version="13.6.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Services\Orders\Orders.Api\Orders.Api.csproj" />
+  </ItemGroup>
+</Project>
