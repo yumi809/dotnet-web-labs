@@ -21,6 +21,7 @@ public interface IOrderRepository : IGenericRepository<Order>
     Task RecalculateTotalAsync(long orderId, CancellationToken ct = default);
     Task ChangeStatusAsync(long orderId, string newStatus, string changedBy, string? reason, byte[]? rowVersion, CancellationToken ct = default);
     Task<bool> SoftDeleteAsync(long orderId, string deletedBy, CancellationToken ct = default);
+    Task<IReadOnlyDictionary<string, long>> CountByStatusAsync(CancellationToken ct = default);
 }
 
 public interface ICustomerRepository : IGenericRepository<Customer>

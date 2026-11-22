@@ -117,6 +117,15 @@ public sealed class OrderRepository(IDbSession session) : BaseDapperRepository<O
         }
     }
 
+    /// <summary>Легкий агрегатний запит (індекс IX_Orders_Status) для gauge-метрик.</summary>
+    public async Task<IReadOnlyDictionary<string, long>> CountByStatusAsync(CancellationToken ct = default)
+    {
+        var connection = await Session.GetOpenConnectionAsync(ct);
+        var rows = await connection.QueryAsync<(string Status, long Count)>(Command(
+            "SELECT Status, COUNT_BIG(*) FROM dbo.Orders WHERE IsDeleted = 0 GROUP BY Status", null, ct));
+        return rows.ToDictionary(r => r.Status, r => r.Count);
+    }
+
     public async Task<bool> SoftDeleteAsync(long orderId, string deletedBy, CancellationToken ct = default)
     {
         var connection = await Session.GetOpenConnectionAsync(ct);

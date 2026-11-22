@@ -18,10 +18,13 @@ public interface IOrderService
     Task UpdateCommentAsync(long orderId, UpdateOrderCommentDto dto, string user, CancellationToken ct);
     Task<IReadOnlyList<OrderStatusHistoryDto>> GetHistoryAsync(long orderId, CancellationToken ct);
     Task DeleteAsync(long orderId, string user, CancellationToken ct);
+    Task<IReadOnlyDictionary<string, long>> CountByStatusAsync(CancellationToken ct);
 }
 
-public sealed class OrderService(IUnitOfWork uow, IMapper mapper, ILogger<OrderService> logger) : IOrderService
+public sealed class OrderService(IUnitOfWork uow, IMapper mapper, IOrderMetrics metrics, ILogger<OrderService> logger) : IOrderService
 {
+    public Task<IReadOnlyDictionary<string, long>> CountByStatusAsync(CancellationToken ct) => uow.Orders.CountByStatusAsync(ct);
+
     public async Task<OrderDto> GetAsync(long id, CancellationToken ct)
     {
         var order = await uow.Orders.GetWithItemsAsync(id, ct) ?? throw new NotFoundException(nameof(Order), id);
@@ -41,6 +44,30 @@ public sealed class OrderService(IUnitOfWork uow, IMapper mapper, ILogger<OrderS
     /// Будь-яка помилка → Rollback.
     /// </summary>
     public async Task<OrderDto> CreateAsync(CreateOrderDto dto, string user, CancellationToken ct)
+    {
+        var created = await MeasureAsync("create", () => CreateCoreAsync(dto, user, ct));
+        metrics.OrderCreated(created.Status);
+        return created;
+    }
+
+    /// <summary>Тривалість записується для ВСІХ виконань — і успішних, і невдалих.</summary>
+    private async Task<T> MeasureAsync<T>(string operation, Func<Task<T>> action)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var result = await action();
+            metrics.RecordDuration(operation, success: true, sw.Elapsed.TotalMilliseconds);
+            return result;
+        }
+        catch
+        {
+            metrics.RecordDuration(operation, success: false, sw.Elapsed.TotalMilliseconds);
+            throw;
+        }
+    }
+
+    private async Task<OrderDto> CreateCoreAsync(CreateOrderDto dto, string user, CancellationToken ct)
     {
         using var activity = OrdersTelemetry.ActivitySource.StartActivity("orders.create");
         activity?.SetTag("customer.id", dto.CustomerId);
@@ -139,7 +166,10 @@ public sealed class OrderService(IUnitOfWork uow, IMapper mapper, ILogger<OrderS
         return await GetAsync(orderId, ct);
     }
 
-    public async Task<OrderDto> ChangeStatusAsync(long orderId, ChangeOrderStatusDto dto, string user, CancellationToken ct)
+    public Task<OrderDto> ChangeStatusAsync(long orderId, ChangeOrderStatusDto dto, string user, CancellationToken ct) =>
+        MeasureAsync("change_status", () => ChangeStatusCoreAsync(orderId, dto, user, ct));
+
+    private async Task<OrderDto> ChangeStatusCoreAsync(long orderId, ChangeOrderStatusDto dto, string user, CancellationToken ct)
     {
         using var activity = OrdersTelemetry.ActivitySource.StartActivity("orders.change_status");
         activity?.SetTag("order.id", orderId);
@@ -157,6 +187,7 @@ public sealed class OrderService(IUnitOfWork uow, IMapper mapper, ILogger<OrderS
 
         // Процедура сама працює в явній транзакції та повторно перевіряє перехід під блокуванням
         await uow.Orders.ChangeStatusAsync(orderId, dto.Status, user, dto.Reason, rowVersion, ct);
+        metrics.StatusChanged(order.Status, dto.Status);
         logger.LogInformation("Order {OrderId} status changed {FromStatus} -> {ToStatus} by {User}",
             orderId, order.Status, dto.Status, user);
         return await GetAsync(orderId, ct);
