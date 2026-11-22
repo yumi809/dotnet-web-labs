@@ -114,8 +114,7 @@ erDiagram
 ```json
 {
   "_id": { "$oid": "6650a1f2c1e4b2a1d0f00001" },
-  "productId": 3,
-  "productName": "Clean Code",
+  "product": { "productId": 3, "productName": "Clean Code" },
   "type": "pros-cons",
   "author": { "userId": "u-taras", "displayName": "Тарас Б." },
   "rating": { "value": 4 },

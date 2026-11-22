@@ -25,7 +25,7 @@
 |---|---|---|---|
 | `OrderItems.ProductName`, `OrderItems.UnitPrice` | OrdersDb | `Products` (CatalogDb) | **знімок** на момент додавання позиції — ніколи не оновлюється |
 | `Products.Name`, `Products.Price`, `Products.IsAvailable` (локальний довідник) | OrdersDb | `Products` (CatalogDb) | **копія для читання**, оновлюється подією `ProductUpdated` з Каталогу (Лаб. 08) |
-| `reviews.productName`, `discussions.productName` | ReviewsDb | `Products.Name` (CatalogDb) | копія, оновлюється подією `ProductUpdated` (Лаб. 08) у всіх документах товару |
+| `reviews.product.productName`, `discussions.product.productName` | ReviewsDb | `Products.Name` (CatalogDb) | копія, оновлюється подією `ProductUpdated` (Лаб. 08) у всіх документах товару |
 | `reviews.author.displayName` | ReviewsDb | профіль користувача (Auth) | знімок на момент написання відгуку |
 | `productRatings.average`, `reviewsCount` | ReviewsDb | колекція `reviews` (той самий контекст) | матеріалізований підсумок, перераховується при створенні/видаленні відгуку |
 
@@ -178,6 +178,41 @@ curl -X POST https://localhost:7102/api/catalog/products -H "Content-Type: appli
 curl -X POST https://localhost:7102/api/catalog/products/1/stock/remove -H "Content-Type: application/json" -d '{"quantity":3}'
 curl https://localhost:7102/api/catalog/publishers/1
 curl "https://localhost:7102/api/catalog/categories/2/new-arrivals?days=30"
+```
+
+## Сервіс Відгуків (Лаб. 04 — Clean Architecture + CQRS + MongoDB)
+
+```
+Services/Reviews/
+├── Reviews.Domain          BaseEntity (ObjectId, CreatedAt, UpdatedAt, Version), ValueObject, Review/Comment/Discussion,
+│                           VO Rating/AuthorInfo/ProductRef, інтерфейси репозиторіїв (без MongoDB.Driver)
+├── Reviews.Application     ICommand/ICommand<T>/IQuery<T>, Commands/, Queries/, Behaviors/, IReviewQueries, валідатори, AutoMapper
+├── Reviews.Infrastructure  MongoDbContext (IOptions), BsonMappings (camelCase, приватні поля, VO через конструктор),
+│                           репозиторії з оптимістичною конкурентністю, ReviewQueries (проєкції), індекси, сідінг
+└── Reviews.WebApi          контролер лише через ISender, GlobalExceptionHandler, Program.cs
+```
+
+Залежності: `Domain → ∅`, `Application → Domain`, `Infrastructure → Application, Domain`, `WebApi → Application, Infrastructure`.
+
+| Вимога | Реалізація |
+|---|---|
+| CQRS | команди `CreateReview`, `UpdateReview`, `DeleteReview`, `AddComment`, `MarkReviewHelpful`; запити `GetReviewById`, `GetReviewsList`, `GetProductRating` |
+| Pipeline | `AddMediatR(RegisterServicesFromAssembly)` + `AddOpenBehavior`: Logging → Validation → Performance |
+| Валідація | FluentValidation для команд і запитів; перевірка ObjectId; асинхронне правило «один відгук на товар від користувача» (запит до MongoDB) |
+| Конкурентність | `ReplaceOne` з фільтром `{_id, version: expected}`; `MatchedCount == 0` → 409 |
+| Читання | `IReviewQueries` → проєкція в DTO на стороні MongoDB, `$match` + `skip/limit` |
+| Помилки | NotFound 404, Validation 400, Conflict 409, DuplicateKey 409, MongoConnectionException 503 |
+| Індекси/сідінг | `MongoIndexInitializer` (складений, унікальний, текстовий), `IDataSeeder` з `InsertMany` і перевіркою наявності |
+
+```bash
+curl "https://localhost:7103/api/reviews?productId=3&minRating=4&page=1&pageSize=10&sortBy=rating"
+curl -X POST https://localhost:7103/api/reviews -H "Content-Type: application/json" \
+     -d '{"productId":2,"productName":"Тіні забутих предків","authorId":"u-olena","authorName":"Олена К.","rating":5,"type":"text","title":"Шедевр","body":"Перечитую щороку"}'
+curl -X PUT https://localhost:7103/api/reviews/<id> -H "Content-Type: application/json" \
+     -d '{"requestedBy":"u-olena","rating":4,"title":"Шедевр","body":"Оновлено","version":1}'
+curl -X POST https://localhost:7103/api/reviews/<id>/comments -H "Content-Type: application/json" \
+     -d '{"authorId":"u-taras","authorName":"Тарас","text":"Згоден"}'
+curl https://localhost:7103/api/reviews/products/3/rating
 ```
 
 ## Структура репозиторію

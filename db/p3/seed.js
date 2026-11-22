@@ -11,19 +11,20 @@ function upsert(coll, filter, doc) {
 }
 
 // --- reviews: різні типи документів (гнучка схема) ---
-upsert("reviews", { productId: NumberLong(1), "author.userId": "u-olena" }, {
-  productId: NumberLong(1), productName: "Кобзар", type: "text",
+upsert("reviews", { "product.productId": NumberLong(1), "author.userId": "u-olena" }, {
+  product: { productId: NumberLong(1), productName: "Кобзар" }, type: "text",
   author: { userId: "u-olena", displayName: "Олена К." },
   rating: { value: NumberInt(5) },
   title: "Must have", body: "Чудове видання, якісний папір.",
   comments: [
     { _id: ObjectId(), author: { userId: "u-taras", displayName: "Тарас" }, text: "Погоджуюсь!", createdAt: now }
   ],
+  pros: [], cons: [],
   helpfulVotes: NumberInt(3), createdAt: now, updatedAt: null, version: NumberInt(1)
 });
 
-upsert("reviews", { productId: NumberLong(3), "author.userId": "u-taras" }, {
-  productId: NumberLong(3), productName: "Clean Code", type: "pros-cons",
+upsert("reviews", { "product.productId": NumberLong(3), "author.userId": "u-taras" }, {
+  product: { productId: NumberLong(3), productName: "Clean Code" }, type: "pros-cons",
   author: { userId: "u-taras", displayName: "Тарас Б." },
   rating: { value: NumberInt(4) },
   title: "Класика для розробника",
@@ -31,24 +32,26 @@ upsert("reviews", { productId: NumberLong(3), "author.userId": "u-taras" }, {
   comments: [], helpfulVotes: NumberInt(0), createdAt: now, updatedAt: null, version: NumberInt(1)
 });
 
-upsert("reviews", { productId: NumberLong(4), "author.userId": "u-iryna" }, {
-  productId: NumberLong(4), productName: "Designing Data-Intensive Applications", type: "video",
+upsert("reviews", { "product.productId": NumberLong(4), "author.userId": "u-iryna" }, {
+  product: { productId: NumberLong(4), productName: "Designing Data-Intensive Applications" }, type: "video",
   author: { userId: "u-iryna", displayName: "Ірина М." },
   rating: { value: NumberInt(5) },
   title: "Відеоогляд", videoUrl: "https://example.com/video/ddia-review",
+  pros: [], cons: [],
   comments: [], helpfulVotes: NumberInt(1), createdAt: now, updatedAt: null, version: NumberInt(1)
 });
 
 // --- discussions (гібрид) + discussionMessages (посилання) ---
-upsert("discussions", { productId: NumberLong(3), topic: "Чи актуальна книга у 2026?" }, {
-  productId: NumberLong(3), productName: "Clean Code", topic: "Чи актуальна книга у 2026?",
-  createdAt: now, lastActivityAt: now, messagesCount: NumberInt(2),
+const topic = "Чи актуальна книга у 2026?";
+upsert("discussions", { "product.productId": NumberLong(3), topic: topic }, {
+  product: { productId: NumberLong(3), productName: "Clean Code" }, topic: topic,
+  createdAt: now, lastActivityAt: now, messagesCount: NumberInt(2), version: NumberInt(1),
   recentMessages: [
     { author: { userId: "u-olena", displayName: "Олена К." }, text: "Так, принципи вічні", createdAt: now },
     { author: { userId: "u-taras", displayName: "Тарас Б." }, text: "Частково", createdAt: now }
   ]
 });
-const disc = db.discussions.findOne({ productId: NumberLong(3), topic: "Чи актуальна книга у 2026?" });
+const disc = db.discussions.findOne({ "product.productId": NumberLong(3), topic: topic });
 upsert("discussionMessages", { discussionId: disc._id, text: "Так, принципи вічні" }, {
   discussionId: disc._id, parentMessageId: null,
   author: { userId: "u-olena", displayName: "Олена К." }, text: "Так, принципи вічні", createdAt: now

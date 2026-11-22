@@ -16,16 +16,19 @@ function ensureCollection(name, validator) {
 
 // 1) reviews — агрегат «Відгук»:
 //    EMBEDDING: author (value object), rating, comments[] (коментарі завжди читаються разом із відгуком, їх мало)
-//    REFERENCING: productId → CatalogDb.Products.Id (логічне посилання без FK)
-//    ДЕНОРМАЛІЗАЦІЯ: productName — копія з Каталогу, оновлюється подією ProductUpdated (Лаб. 08)
+//    REFERENCING: product.productId → CatalogDb.Products.Id (логічне посилання без FK)
+//    ДЕНОРМАЛІЗАЦІЯ: product.productName — копія з Каталогу, оновлюється подією ProductUpdated (Лаб. 08)
 //    ГНУЧКА СХЕМА: type = "text" | "pros-cons" | "video" — різні набори полів (pros/cons, videoUrl)
 ensureCollection("reviews", {
   $jsonSchema: {
     bsonType: "object",
-    required: ["productId", "productName", "author", "rating", "title", "createdAt", "version"],
+    required: ["product", "author", "rating", "title", "createdAt", "version"],
     properties: {
-      productId: { bsonType: "long" },
-      productName: { bsonType: "string", maxLength: 200 },
+      product: {                      // value object ProductRef: посилання + денормалізована назва
+        bsonType: "object",
+        required: ["productId", "productName"],
+        properties: { productId: { bsonType: "long" }, productName: { bsonType: "string", maxLength: 200 } }
+      },
       type: { enum: ["text", "pros-cons", "video"] },
       author: {
         bsonType: "object",
@@ -54,10 +57,9 @@ ensureCollection("reviews", {
 ensureCollection("discussions", {
   $jsonSchema: {
     bsonType: "object",
-    required: ["productId", "productName", "topic", "createdAt", "messagesCount"],
+    required: ["product", "topic", "createdAt", "messagesCount"],
     properties: {
-      productId: { bsonType: "long" },
-      productName: { bsonType: "string" },
+      product: { bsonType: "object", required: ["productId", "productName"] },
       topic: { bsonType: "string", maxLength: 200 },
       recentMessages: { bsonType: "array", maxItems: 3 },
       messagesCount: { bsonType: "int", minimum: 0 }
@@ -93,9 +95,9 @@ ensureCollection("productRatings", {
 });
 
 // Індекси (createIndex ідемпотентний)
-db.reviews.createIndex({ productId: 1, createdAt: -1 }, { name: "ix_reviews_product_created" });   // відгуки товару, новіші першими
-db.reviews.createIndex({ productId: 1, "author.userId": 1 }, { name: "ux_reviews_product_author", unique: true }); // один відгук на товар від користувача
+db.reviews.createIndex({ "product.productId": 1, createdAt: -1 }, { name: "ix_reviews_product_created" });   // відгуки товару, новіші першими
+db.reviews.createIndex({ "product.productId": 1, "author.userId": 1 }, { name: "ux_reviews_product_author", unique: true }); // один відгук на товар від користувача
 db.reviews.createIndex({ title: "text", body: "text" }, { name: "tx_reviews_text" });              // повнотекстовий пошук
-db.discussions.createIndex({ productId: 1, lastActivityAt: -1 }, { name: "ix_discussions_product_activity" });
+db.discussions.createIndex({ "product.productId": 1, lastActivityAt: -1 }, { name: "ix_discussions_product_activity" });
 db.discussionMessages.createIndex({ discussionId: 1, createdAt: 1 }, { name: "ix_messages_discussion_created" });
 print("ReviewsDb collections and indexes are ready");
