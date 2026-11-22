@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Reviews.Domain</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Лише тип ObjectId; драйвера MongoDB у доменному шарі немає -->
+    <PackageReference Include="MongoDB.Bson" Version="3.14.1" />
+  </ItemGroup>
+</Project>
