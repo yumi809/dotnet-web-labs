@@ -30,8 +30,26 @@ public sealed class ProductService(
     IValidator<UpdateProductDto> updateValidator,
     IValidator<ProductQueryDto> queryValidator,
     ICatalogCache cache,
+    ICatalogMetrics metrics,
     ILogger<ProductService> logger) : IProductService
 {
+    /// <summary>Тривалість операцій запису записується і для успішних, і для невдалих виконань.</summary>
+    private async Task<T> MeasureAsync<T>(string operation, Func<Task<T>> action)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var result = await action();
+            metrics.RecordDuration(operation, true, sw.Elapsed.TotalMilliseconds);
+            return result;
+        }
+        catch
+        {
+            metrics.RecordDuration(operation, false, sw.Elapsed.TotalMilliseconds);
+            throw;
+        }
+    }
+
     /// <summary>Сторінки каталогу — read-heavy: cache-aside з ключем із параметрів запиту та версії списків.</summary>
     public async Task<PagedResult<ProductListItemDto>> GetPagedAsync(ProductQueryDto query, CancellationToken ct)
     {
@@ -68,6 +86,13 @@ public sealed class ProductService(
 
     public async Task<ProductDto> CreateAsync(CreateProductDto dto, CancellationToken ct)
     {
+        var created = await MeasureAsync("create", () => CreateCoreAsync(dto, ct));
+        metrics.ProductCreated(created.Categories.FirstOrDefault(c => c.IsPrimary)?.Slug ?? "none");
+        return created;
+    }
+
+    private async Task<ProductDto> CreateCoreAsync(CreateProductDto dto, CancellationToken ct)
+    {
         using var activity = CatalogTelemetry.ActivitySource.StartActivity("catalog.product.create");
         activity?.SetTag("product.sku", dto.Sku);
         await createValidator.ValidateAndThrowAsync(dto, ct);
@@ -91,7 +116,10 @@ public sealed class ProductService(
         return await GetAsync(product.Id, ct);
     }
 
-    public async Task<ProductDto> UpdateAsync(long id, UpdateProductDto dto, CancellationToken ct)
+    public Task<ProductDto> UpdateAsync(long id, UpdateProductDto dto, CancellationToken ct) =>
+        MeasureAsync("update", () => UpdateCoreAsync(id, dto, ct));
+
+    private async Task<ProductDto> UpdateCoreAsync(long id, UpdateProductDto dto, CancellationToken ct)
     {
         using var activity = CatalogTelemetry.ActivitySource.StartActivity("catalog.product.update");
         activity?.SetTag("product.id", id);
@@ -106,6 +134,7 @@ public sealed class ProductService(
         product.ChangePublisher(dto.PublisherId);
         await uow.SaveChangesAsync(ct);
         await InvalidateAsync(id, "product updated", ct);
+        metrics.PriceChanged(oldPrice, dto.Price);
         logger.LogInformation("Product {ProductId} updated, price {OldPrice} -> {NewPrice}", id, oldPrice, dto.Price);
         return await GetAsync(id, ct);
     }
@@ -116,6 +145,7 @@ public sealed class ProductService(
         product.AddStock(quantity);
         await uow.SaveChangesAsync(ct);
         await InvalidateAsync(id, "stock added", ct);
+        metrics.StockMoved("add", quantity);
         return await GetAsync(id, ct);
     }
 
@@ -125,6 +155,7 @@ public sealed class ProductService(
         product.RemoveStock(quantity);
         await uow.SaveChangesAsync(ct);
         await InvalidateAsync(id, "stock removed", ct);
+        metrics.StockMoved("remove", quantity);
         return await GetAsync(id, ct);
     }
 

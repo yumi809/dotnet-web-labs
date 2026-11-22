@@ -1,5 +1,7 @@
 using Catalog.Api.Grpc;
+using Catalog.Api.HealthChecks;
 using Catalog.Api.Infrastructure;
+using Catalog.Api.Metrics;
 using Platform.ServiceDefaults.Grpc;
 using Catalog.Bll;
 using Serilog;
@@ -14,6 +16,15 @@ builder.Services.AddCatalogBll(builder.Configuration); // ConnectionStrings:Cata
 
 // L2-кеш: IDistributedCache поверх Redis через Aspire-інтеграцію (ConnectionStrings:redis)
 builder.AddRedisDistributedCache("redis");
+
+// Бізнес-метрики (Meter "Catalog.Api") + знімок стану для gauge
+builder.Services.AddSingleton<CatalogSnapshot>();
+builder.Services.AddSingleton<CatalogMetrics>();
+builder.Services.AddSingleton<ICatalogMetrics>(sp => sp.GetRequiredService<CatalogMetrics>());
+builder.Services.AddHostedService<CatalogSnapshotRefresher>();
+
+// Health checks: catalog-db (Unhealthy), redis-cache (Degraded), gRPC Health Checking Protocol
+builder.Services.AddCatalogHealthChecks(builder.Configuration);
 
 // gRPC (HTTP/2) з серверним interceptor-ом логування
 builder.Services.AddGrpc(o => o.Interceptors.Add<ServerLoggingInterceptor>());
@@ -43,5 +54,6 @@ if (app.Environment.IsDevelopment())
 
 app.MapControllers();
 app.MapGrpcService<CatalogGrpcService>();
+app.MapGrpcHealthChecksService();
 app.MapDefaultEndpoints();
 app.Run();

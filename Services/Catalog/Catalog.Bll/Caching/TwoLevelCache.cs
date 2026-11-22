@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using StackExchange.Redis;
 
 namespace Catalog.Bll.Caching;
 
@@ -17,6 +18,10 @@ public interface ICatalogCache
 /// <summary>
 /// Ручна реалізація дворівневого кешу: L1 — IMemoryCache (SizeLimit, Size, sliding + absolute),
 /// L2 — IDistributedCache поверх Redis (System.Text.Json, префікс ключів, TTL за типом даних).
+/// <para>
+/// Graceful degradation (Лаб. 07): кеш — необов'язкова залежність. Кожна операція з Redis у try/catch:
+/// збій логується як Warning і НЕ провалює запит — сервіс читає з бази даних.
+/// </para>
 /// </summary>
 public sealed class TwoLevelCache(
     IMemoryCache memory,
@@ -38,8 +43,17 @@ public sealed class TwoLevelCache(
         }
         metrics.Miss("L1", entity);
 
-        // L2
-        var bytes = await redis.GetAsync(key, ct);
+        // L2 (Redis) — при недоступності вважаємо промахом і йдемо в БД
+        byte[]? bytes = null;
+        try
+        {
+            bytes = await redis.GetAsync(key, ct);
+        }
+        catch (Exception ex) when (IsRedisFailure(ex))
+        {
+            logger.LogWarning(ex, "Redis unavailable, falling back to database for {CacheKey}", key);
+        }
+
         if (bytes is not null)
         {
             var l2Value = JsonSerializer.Deserialize<T>(bytes, Json);
@@ -55,8 +69,15 @@ public sealed class TwoLevelCache(
         var value = await factory(ct);
         if (value is null) return null;
 
-        await redis.SetAsync(key, JsonSerializer.SerializeToUtf8Bytes(value, Json),
-            new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = ttl.L2Absolute }, ct);
+        try
+        {
+            await redis.SetAsync(key, JsonSerializer.SerializeToUtf8Bytes(value, Json),
+                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = ttl.L2Absolute }, ct);
+        }
+        catch (Exception ex) when (IsRedisFailure(ex))
+        {
+            logger.LogWarning(ex, "Redis unavailable, value for {CacheKey} not cached in L2", key);
+        }
         SetL1(key, value, ttl);
         return value;
     }
@@ -64,24 +85,49 @@ public sealed class TwoLevelCache(
     public async Task RemoveAsync(string key, string reason, CancellationToken ct)
     {
         memory.Remove(key);
-        await redis.RemoveAsync(key, ct);
+        try
+        {
+            await redis.RemoveAsync(key, ct);
+        }
+        catch (Exception ex) when (IsRedisFailure(ex))
+        {
+            logger.LogWarning(ex, "Redis unavailable, L2 key {CacheKey} not invalidated (expires by TTL)", key);
+        }
         metrics.Invalidated(reason);
         logger.LogInformation("Cache key {CacheKey} invalidated: {Reason}", key, reason);
     }
 
     public async Task<long> GetListVersionAsync(CancellationToken ct)
     {
-        var raw = await redis.GetStringAsync(CacheKeys.ProductListVersion, ct);
-        return long.TryParse(raw, out var v) ? v : 0;
+        try
+        {
+            var raw = await redis.GetStringAsync(CacheKeys.ProductListVersion, ct);
+            return long.TryParse(raw, out var v) ? v : 0;
+        }
+        catch (Exception ex) when (IsRedisFailure(ex))
+        {
+            logger.LogWarning(ex, "Redis unavailable, list version defaults to 0");
+            return 0;
+        }
     }
 
     public async Task BumpListVersionAsync(string reason, CancellationToken ct)
     {
-        var next = await GetListVersionAsync(ct) + 1;
-        await redis.SetStringAsync(CacheKeys.ProductListVersion, next.ToString(), ct);
-        metrics.Invalidated(reason);
-        logger.LogInformation("Product list cache invalidated (version {Version}): {Reason}", next, reason);
+        try
+        {
+            var next = await GetListVersionAsync(ct) + 1;
+            await redis.SetStringAsync(CacheKeys.ProductListVersion, next.ToString(), ct);
+            metrics.Invalidated(reason);
+            logger.LogInformation("Product list cache invalidated (version {Version}): {Reason}", next, reason);
+        }
+        catch (Exception ex) when (IsRedisFailure(ex))
+        {
+            logger.LogWarning(ex, "Redis unavailable, product list version not bumped: {Reason}", reason);
+        }
     }
+
+    private static bool IsRedisFailure(Exception ex) =>
+        ex is RedisConnectionException or RedisTimeoutException or RedisException or TimeoutException or ObjectDisposedException;
 
     private void SetL1<T>(string key, T value, CacheTtl ttl) =>
         memory.Set(key, value, new MemoryCacheEntryOptions
