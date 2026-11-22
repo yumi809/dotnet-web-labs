@@ -1,0 +1,11 @@
+bin/
+obj/
+.vs/
+.idea/
+*.user
+*.suo
+.vscode/
+TestResults/
+*.log
+appsettings.*.local.json
+**/Pulumi.*.secrets.yaml
