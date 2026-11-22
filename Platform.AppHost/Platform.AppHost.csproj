@@ -2,12 +2,17 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <UserSecretsId>bookhub-apphost-7f3c2a11</UserSecretsId>
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.SqlServer" Version="13.6.5" />
+    <PackageReference Include="Aspire.Hosting.MongoDB" Version="13.6.5" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Services\Orders\Orders.Api\Orders.Api.csproj" />
     <ProjectReference Include="..\Services\Catalog\Catalog.Api\Catalog.Api.csproj" />
+    <ProjectReference Include="..\Services\Reviews\Reviews.WebApi\Reviews.WebApi.csproj" />
+    <ProjectReference Include="..\Platform.Aggregator\Platform.Aggregator.csproj" />
+    <ProjectReference Include="..\Platform.ApiGateway\Platform.ApiGateway.csproj" />
   </ItemGroup>
 </Project>

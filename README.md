@@ -91,6 +91,50 @@ AppHost піднімає контейнер SQL Server, створює базу 
 `ConnectionStrings:OrdersDb`) і запускає `orders-api` з `WithReference(ordersDb).WaitFor(ordersDb)`.
 У Development `Orders.Api` при старті виконує ідемпотентні скрипти `db/p1/*.sql`. Адреси сервісів — в Aspire Dashboard.
 
+## Платформа на .NET Aspire (Лаб. 05)
+
+```
+Platform.AppHost/         оркестрація: SQL Server + MongoDB (WithDataVolume), сервіси, Aggregator, Gateway
+Platform.ServiceDefaults/ Extensions.cs: Serilog, OpenTelemetry, CorrelationId, service discovery, resilience, health
+Platform.ApiGateway/      YARP: маршрути /api/orders|catalog|reviews|aggregator, CorrelationId, логування маршрутизації
+Platform.Aggregator/      typed HttpClients, паралельна агрегація, часткові відповіді з Warnings
+```
+
+### Запуск
+
+```bash
+# пароль SQL Server — параметр-секрет AppHost
+dotnet user-secrets set "Parameters:sql-password" "<StrongPassw0rd!>" --project Platform.AppHost
+dotnet run --project Platform.AppHost
+```
+
+Порядок старту: `sql`/`mongo` → `orders-api`, `catalog-api`, `reviews-api` → `aggregator` → `gateway`
+(`WithReference` + `WaitFor`). Gateway слухає фіксований порт **http://localhost:5000**. Dashboard Aspire відкривається
+автоматично (Resources, Structured logs, Traces, Metrics).
+
+### Запити через Gateway
+
+```bash
+curl http://localhost:5000/api/catalog/products?page=1&pageSize=5
+curl http://localhost:5000/api/orders/1
+curl "http://localhost:5000/api/reviews?productId=3"
+
+# Aggregator: картка замовлення (Orders + Catalog + Reviews паралельно)
+curl -H "X-Correlation-Id: demo-123" http://localhost:5000/api/aggregator/orders/1/details
+# Aggregator: картка книги (Catalog + рейтинг + 3 останні відгуки)
+curl http://localhost:5000/api/aggregator/products/3
+```
+
+Якщо один із сервісів недоступний, Aggregator повертає 200 з доступними даними та списком `warnings`
+(наприклад `"Reviews are unavailable: ratings are not shown"`), а не 500. Обов'язкова частина (замовлення/товар) → 503.
+
+| Наскрізні механізми | Де |
+|---|---|
+| `X-Correlation-Id`: береться із запиту або генерується, кладеться в `LogContext`, відповідь і вихідні запити (`CorrelationIdDelegatingHandler`) | `Platform.ServiceDefaults/Correlation` |
+| Serilog: `ServiceName`, `EnvironmentName`, `MachineName`, `ThreadId`, `FromLogContext`, `CompactJsonFormatter`, `writeToProviders: true` | `Platform.ServiceDefaults/Extensions.cs` |
+| OpenTelemetry: ASP.NET Core, HttpClient, SqlClient, MongoDB DiagnosticSources, власні `ActivitySource` `BookHub.*`, `UseOtlpExporter` | `Platform.ServiceDefaults/Extensions.cs` |
+| Власні spans бізнес-операцій | `OrdersTelemetry`, `CatalogTelemetry`, `ReviewsTelemetry` |
+
 ## Сервіс Замовлень (Лаб. 02 — ADO.NET + Dapper)
 
 ```
