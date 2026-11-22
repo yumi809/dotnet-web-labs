@@ -39,6 +39,7 @@ public static class DependencyInjection
         services.AddScoped<IReviewRepository, ReviewRepository>();
         services.AddScoped<IDiscussionRepository, DiscussionRepository>();
         services.AddScoped<IReviewQueries, ReviewQueries>();
+        services.AddScoped<Reviews.Application.Commands.IProcessedEventStore, ProcessedEventStore>();
         services.AddSingleton<IDataSeeder, ReviewsDataSeeder>();
         services.AddHostedService<MongoIndexInitializer>();
         return services;

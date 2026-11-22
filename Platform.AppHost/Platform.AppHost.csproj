@@ -8,6 +8,7 @@
     <PackageReference Include="Aspire.Hosting.SqlServer" Version="13.6.5" />
     <PackageReference Include="Aspire.Hosting.MongoDB" Version="13.6.5" />
     <PackageReference Include="Aspire.Hosting.Redis" Version="13.6.5" />
+    <PackageReference Include="Aspire.Hosting.RabbitMQ" Version="13.6.5" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Services\Orders\Orders.Api\Orders.Api.csproj" />

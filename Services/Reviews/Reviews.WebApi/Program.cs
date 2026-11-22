@@ -1,6 +1,9 @@
 using Reviews.Application;
 using Reviews.Infrastructure;
+using Platform.EventBus;
+using Platform.EventBus.Events;
 using Platform.ServiceDefaults.Grpc;
+using Reviews.WebApi.IntegrationEvents;
 using Reviews.WebApi.Grpc;
 using Reviews.WebApi.HealthChecks;
 using Reviews.WebApi.Metrics;
@@ -13,6 +16,11 @@ builder.AddServiceDefaults();                                     // Serilog, Op
 builder.Services.AddApplication();                                // MediatR + behaviors + валідатори + AutoMapper
 builder.Services.AddInfrastructure(builder.Configuration);        // MongoDB (ConnectionStrings:ReviewsDb / секція MongoDb)
 builder.Services.AddAutoMapper(cfg => { }, typeof(Program).Assembly); // request → command
+
+// RabbitMQ: споживання ProductUpdated з черги reviews-api.events (оновлення productName у документах)
+builder.AddEventBus();
+builder.AddEventConsumer("reviews-api.events")
+    .Subscribe<ProductUpdatedIntegrationEvent, ProductUpdatedHandler>("catalog.product.updated");
 
 builder.Services.AddSingleton<ReviewMetrics>();
 builder.Services.AddSingleton<IReviewMetrics>(sp => sp.GetRequiredService<ReviewMetrics>());

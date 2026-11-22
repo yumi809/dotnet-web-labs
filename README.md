@@ -215,6 +215,48 @@ curl https://localhost:<catalog-port>/health/ready         # зупиніть Re
 curl https://localhost:<orders-port>/health/live           # зупиніть SQL Server → live 200, ready 503
 ```
 
+## Подієва архітектура з RabbitMQ (Лаб. 08)
+
+```
+Platform.EventBus/
+├── Abstractions/   IntegrationEvent (EventId, OccurredAt, CorrelationId), IEventPublisher, IIntegrationEventHandler<T>
+├── Events/         ProductUpdated, ProductPriceChanged, OrderCreated — незмінні record-и, назви в минулому часі
+├── RabbitMq/       топологія, publisher, consumer (BackgroundService), телеметрія, опції
+└── EventBusExtensions.cs   AddEventBus() → AddRabbitMQClient("messaging"); AddEventConsumer(queue).Subscribe<TEvent, THandler>()
+```
+
+| Потік | Publisher → routing key | Consumer (черга) | Дія |
+|---|---|---|---|
+| Зміна товару | Catalog → `catalog.product.updated` | `orders-api.events` | upsert локального довідника `dbo.Products` (ціни в оформлених позиціях — знімок, не змінюються) |
+| Зміна товару | Catalog → `catalog.product.updated` | `reviews-api.events` | оновлення `product.productName` в усіх відгуках і обговореннях товару |
+| Нове замовлення | Orders → `orders.order.created` | `catalog-api.events` | резервування запасу (`RemoveStock`) |
+| Зміна ціни | Catalog → `catalog.product.price-changed` | — (для аналітики) | — |
+
+* **Топологія при старті**: durable topic exchange `bookhub.events`; на кожен сервіс-споживач — durable черга з
+  `x-dead-letter-exchange = bookhub.events.dlx`; DLQ `<queue>.dlq` прив'язана до DLX.
+* **Публікація**: camelCase JSON; `BasicProperties`: `Persistent`, `ContentType`, `MessageId = EventId`, `Type`, заголовки
+  `x-correlation-id` і W3C `traceparent`. Події публікуються **лише після успішного** `SaveChanges`/`Commit`
+  (`ProductService`, `OrderService`); збій брокера логується з бізнес-контекстом (наступний крок — Transactional Outbox).
+* **Споживання**: `RabbitMqConsumerService` — `BasicQos(prefetch 10)`, `AsyncEventingBasicConsumer`, `BasicConsumeAsync(autoAck: false)`,
+  коректна зупинка за `stoppingToken`; окремий обробник на тип події в DI-scope повідомлення.
+* **Ack/Nack**: успіх → Ack; некоректний JSON, невідомий тип, `PermanentEventException` → `Nack(requeue: false)` → DLQ.
+* **Повтори**: тимчасова помилка → перепублікація в ту ж чергу з `x-retry-count + 1` і Ack оригіналу; після 3 спроб → DLQ.
+* **Ідемпотентність**: EventId з унікальним ключем у тій самій транзакції, що й бізнес-зміни —
+  OrdersDb `dbo.ProcessedEvents` (транзакція UoW), CatalogDb `ProcessedEvents` (міграція `AddProcessedEvents`, один `SaveChangesAsync`),
+  ReviewsDb колекція `processedEvents` (`_id = EventId`).
+* **Трасування**: `traceparent` впроваджується при публікації, у споживачі — `Activity` типу Consumer з тегами `messaging.*`
+  (ActivitySource `BookHub.EventBus` підключено в ServiceDefaults). Логи обробки містять EventId, тип події, Id сутностей і CorrelationId.
+
+RabbitMQ Management UI — посилання на ресурс `messaging` в Aspire Dashboard.
+
+```bash
+# змінити ціну → ProductUpdated → довідник Замовлень і назви у Відгуках оновлюються
+curl -X PUT http://localhost:5000/api/catalog/products/3 -H "Content-Type: application/json" \
+     -d '{"name":"Clean Code (2nd ed.)","author":"Robert C. Martin","price":1390,"publisherId":3}'
+curl http://localhost:5000/api/orders/products          # нова назва/ціна в довіднику
+curl "http://localhost:5000/api/reviews?productId=3"    # productName оновлено
+```
+
 ## Сервіс Замовлень (Лаб. 02 — ADO.NET + Dapper)
 
 ```
@@ -351,4 +393,6 @@ Platform.slnx        одне рішення на всю платформу
 Platform.AppHost/    оркестрація Aspire (AppHost.cs)
 Services/Orders/     Проєкт №1 — ADO.NET + Dapper
 Services/Catalog/    Проєкт №2 — EF Core
+Services/Reviews/    Проєкт №3 — Clean Architecture + CQRS + MongoDB
+Platform.ServiceDefaults/ Platform.ApiGateway/ Platform.Aggregator/ Platform.EventBus/
 ```

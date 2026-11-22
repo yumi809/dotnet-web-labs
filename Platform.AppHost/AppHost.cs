@@ -20,6 +20,12 @@ var redis = builder.AddRedis("redis")
     .WithDataVolume("bookhub-redis-data")
     .WithLifetime(ContainerLifetime.Persistent);
 
+// RabbitMQ — брокер інтеграційних подій: постійне сховище + Management UI (порт 15672)
+var messaging = builder.AddRabbitMQ("messaging")
+    .WithDataVolume("bookhub-rabbitmq-data")
+    .WithManagementPlugin()
+    .WithLifetime(ContainerLifetime.Persistent);
+
 // ---------- Мікросервіси (БД → сервіси) ----------
 // WithHttpHealthCheck: Dashboard показує стан ресурсу (Healthy / Degraded / Unhealthy),
 // а WaitFor у залежних ресурсів чекає, поки сервіс стане ЗДОРОВИМ, а не лише запуститься.
@@ -28,6 +34,8 @@ const string ReadinessPath = "/health/ready";
 var ordersApi = builder.AddProject<Projects.Orders_Api>("orders-api")
     .WithReference(ordersDb)
     .WaitFor(ordersDb)
+    .WithReference(messaging)          // publisher OrderCreated + consumer ProductUpdated
+    .WaitFor(messaging)
     .WithHttpHealthCheck(ReadinessPath);
 
 var catalogApi = builder.AddProject<Projects.Catalog_Api>("catalog-api")
@@ -35,11 +43,15 @@ var catalogApi = builder.AddProject<Projects.Catalog_Api>("catalog-api")
     .WaitFor(catalogDb)
     .WithReference(redis)
     .WaitFor(redis)
+    .WithReference(messaging)          // publisher ProductUpdated + consumer OrderCreated
+    .WaitFor(messaging)
     .WithHttpHealthCheck(ReadinessPath);
 
 var reviewsApi = builder.AddProject<Projects.Reviews_WebApi>("reviews-api")
     .WithReference(reviewsDb)
     .WaitFor(reviewsDb)
+    .WithReference(messaging)          // consumer ProductUpdated
+    .WaitFor(messaging)
     .WithHttpHealthCheck(ReadinessPath);
 
 // ---------- Aggregator (сервіси → Aggregator) ----------

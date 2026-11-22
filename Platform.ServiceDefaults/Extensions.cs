@@ -92,6 +92,7 @@ public static class Extensions
             .WithTracing(tracing => tracing
                 .AddSource(builder.Environment.ApplicationName)
                 .AddSource($"{TelemetryPrefix}.*")                                  // власні ActivitySource бізнес-операцій
+                .AddSource("BookHub.EventBus")                                      // publish/process через RabbitMQ (traceparent у заголовках)
                 .AddSource("MongoDB.Driver.Core.Extensions.DiagnosticSources")     // команди MongoDB
                 .AddAspNetCoreInstrumentation(o => o.Filter = ctx =>
                     !ctx.Request.Path.StartsWithSegments(HealthEndpointPath) && !ctx.Request.Path.StartsWithSegments(AlivenessEndpointPath))
