@@ -18,6 +18,7 @@ public sealed class GrpcAggregationService(
     CatalogService.CatalogServiceClient catalog,
     ReviewsService.ReviewsServiceClient reviews,
     IDistributedCache cache,
+    Metrics.AggregatorMetrics metrics,
     ILogger<GrpcAggregationService> logger)
 {
     private static readonly TimeSpan CallDeadline = TimeSpan.FromSeconds(3);
@@ -26,8 +27,13 @@ public sealed class GrpcAggregationService(
 
     public async Task<ProductCardDto?> GetProductCardAsync(long productId, CancellationToken ct)
     {
+        var sw = Stopwatch.StartNew();
         var cacheKey = $"aggregator:product-card:{productId}";
-        if (await TryGetCachedAsync<ProductCardDto>(cacheKey, ct) is { } cached) return cached; // ДО gRPC-викликів
+        if (await TryGetCachedAsync<ProductCardDto>(cacheKey, ct) is { } cached) // ДО gRPC-викликів
+        {
+            metrics.Record("product-card", "cached", sw.Elapsed.TotalMilliseconds);
+            return cached;
+        }
 
         var productTask = CallAsync("catalog-api", "GetProduct",
             () => catalog.GetProductAsync(new GetProductRequest { Id = productId }, deadline: Deadline(), cancellationToken: ct).ResponseAsync);
@@ -59,13 +65,19 @@ public sealed class GrpcAggregationService(
         };
 
         await CacheIfCompleteAsync(cacheKey, card, card.Warnings.Count == 0, ct);
+        metrics.Record("product-card", card.Warnings.Count == 0 ? "complete" : "partial", sw.Elapsed.TotalMilliseconds);
         return card;
     }
 
     public async Task<OrderDetailsDto?> GetOrderDetailsAsync(long orderId, CancellationToken ct)
     {
+        var sw = Stopwatch.StartNew();
         var cacheKey = $"aggregator:order-details:{orderId}";
-        if (await TryGetCachedAsync<OrderDetailsDto>(cacheKey, ct) is { } cached) return cached;
+        if (await TryGetCachedAsync<OrderDetailsDto>(cacheKey, ct) is { } cached)
+        {
+            metrics.Record("order-details", "cached", sw.Elapsed.TotalMilliseconds);
+            return cached;
+        }
 
         var orderResult = await CallAsync("orders-api", "GetOrder",
             () => orders.GetOrderAsync(new GetOrderRequest { Id = orderId }, deadline: Deadline(), cancellationToken: ct).ResponseAsync);
@@ -122,20 +134,30 @@ public sealed class GrpcAggregationService(
         };
 
         await CacheIfCompleteAsync(cacheKey, details, warnings.Count == 0, ct);
+        metrics.Record("order-details", warnings.Count == 0 ? "complete" : "partial", sw.Elapsed.TotalMilliseconds);
         return details;
     }
 
     private static DateTime Deadline() => DateTime.UtcNow.Add(CallDeadline);
 
+    /// <summary>Graceful degradation: недоступність Redis не ламає агрегацію — просто йдемо до сервісів.</summary>
     private async Task<T?> TryGetCachedAsync<T>(string key, CancellationToken ct) where T : class
     {
-        var bytes = await cache.GetAsync(key, ct);
-        if (bytes is null) return null;
-        logger.LogDebug("Aggregate cache hit {CacheKey}", key);
-        return JsonSerializer.Deserialize<T>(bytes, Json);
+        try
+        {
+            var bytes = await cache.GetAsync(key, ct);
+            if (bytes is null) return null;
+            logger.LogDebug("Aggregate cache hit {CacheKey}", key);
+            return JsonSerializer.Deserialize<T>(bytes, Json);
+        }
+        catch (Exception ex) when (ex is StackExchange.Redis.RedisException or TimeoutException)
+        {
+            logger.LogWarning(ex, "Redis unavailable, aggregating without cache for {CacheKey}", key);
+            return null;
+        }
     }
 
-    /// <summary>Часткові відповіді (з попередженнями) не кешуються.</summary>
+    /// <summary>Часткові відповіді (з попередженнями) не кешуються; збій Redis лише логується.</summary>
     private async Task CacheIfCompleteAsync<T>(string key, T value, bool complete, CancellationToken ct)
     {
         if (!complete)
@@ -143,8 +165,15 @@ public sealed class GrpcAggregationService(
             logger.LogInformation("Partial aggregate {CacheKey} is not cached", key);
             return;
         }
-        await cache.SetAsync(key, JsonSerializer.SerializeToUtf8Bytes(value, Json),
-            new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = AggregateTtl }, ct);
+        try
+        {
+            await cache.SetAsync(key, JsonSerializer.SerializeToUtf8Bytes(value, Json),
+                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = AggregateTtl }, ct);
+        }
+        catch (Exception ex) when (ex is StackExchange.Redis.RedisException or TimeoutException)
+        {
+            logger.LogWarning(ex, "Redis unavailable, aggregate {CacheKey} not cached", key);
+        }
     }
 
     private async Task<CallResult<T>> CallAsync<T>(string service, string operation, Func<Task<T>> call) where T : class

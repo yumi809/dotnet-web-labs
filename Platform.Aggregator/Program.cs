@@ -2,7 +2,12 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Catalog.Grpc.V1;
 using Orders.Grpc.V1;
+using Grpc.Health.V1;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Platform.Aggregator.Clients;
+using Platform.Aggregator.HealthChecks;
+using Platform.Aggregator.Metrics;
+using Platform.Aggregator.Resilience;
 using Platform.Aggregator.Services;
 using Reviews.Grpc.V1;
 using Serilog;
@@ -14,15 +19,38 @@ builder.AddServiceDefaults(); // resilience + service discovery + CorrelationId 
 // Redis для кешування агрегованих відповідей (Aspire-інтеграція)
 builder.AddRedisDistributedCache("redis");
 
-// Typed HttpClients (REST): логічні імена ресурсів Aspire, схема https+http — спершу https, інакше http
+// Typed HttpClients (REST): логічні імена ресурсів Aspire, схема https+http — спершу https, інакше http.
+// Orders — стандартний обробник із ServiceDefaults; Catalog/Reviews — власні політики за критичністю (Лаб. 07).
 builder.Services.AddHttpClient<OrdersClient>(c => c.BaseAddress = new Uri("https+http://orders-api"));
-builder.Services.AddHttpClient<CatalogClient>(c => c.BaseAddress = new Uri("https+http://catalog-api"));
-builder.Services.AddHttpClient<ReviewsClient>(c => c.BaseAddress = new Uri("https+http://reviews-api"));
+builder.Services.AddHttpClient<CatalogClient>(c => c.BaseAddress = new Uri("https+http://catalog-api"))
+    .AddCriticalResilience("catalog-http");
+builder.Services.AddHttpClient<ReviewsClient>(c => c.BaseAddress = new Uri("https+http://reviews-api"))
+    .AddNonCriticalResilience("reviews-http");
 
-// Типізовані gRPC-клієнти для кожного мікросервісу; адреса — логічне ім'я, яке резолвить service discovery
-builder.Services.AddGrpcClient<OrdersService.OrdersServiceClient>(o => o.Address = new Uri("https://orders-api"));
-builder.Services.AddGrpcClient<CatalogService.CatalogServiceClient>(o => o.Address = new Uri("https://catalog-api"));
-builder.Services.AddGrpcClient<ReviewsService.ReviewsServiceClient>(o => o.Address = new Uri("https://reviews-api"));
+// Типізовані gRPC-клієнти для кожного мікросервісу; адреса — логічне ім'я, яке резолвить service discovery.
+// Retry за gRPC-статусами — політикою каналу; HTTP-рівень — ті ж політики за критичністю.
+builder.Services.AddGrpcClient<OrdersService.OrdersServiceClient>(o => o.Address = new Uri("https://orders-api"))
+    .WithGrpcRetry(maxAttempts: 3, initialBackoff: TimeSpan.FromSeconds(0.5));
+builder.Services.AddGrpcClient<CatalogService.CatalogServiceClient>(o => o.Address = new Uri("https://catalog-api"))
+    .WithGrpcRetry(maxAttempts: 4, initialBackoff: TimeSpan.FromSeconds(0.5))
+    .AddCriticalResilience("catalog-grpc");
+builder.Services.AddGrpcClient<ReviewsService.ReviewsServiceClient>(o => o.Address = new Uri("https://reviews-api"))
+    .WithGrpcRetry(maxAttempts: 2, initialBackoff: TimeSpan.FromSeconds(0.2))
+    .AddNonCriticalResilience("reviews-grpc");
+
+// Health checks залежностей: стандартний gRPC Health Checking Protocol кожного сервісу
+builder.Services.AddGrpcClient<Health.HealthClient>("orders-health", o => o.Address = new Uri("https://orders-api"));
+builder.Services.AddGrpcClient<Health.HealthClient>("catalog-health", o => o.Address = new Uri("https://catalog-api"));
+builder.Services.AddGrpcClient<Health.HealthClient>("reviews-health", o => o.Address = new Uri("https://reviews-api"));
+builder.Services.AddHealthChecks()
+    .AddTypeActivatedCheck<GrpcDependencyHealthCheck>("catalog-api", failureStatus: HealthStatus.Unhealthy, tags: ["grpc", "downstream", "ready"], args: "catalog-health")
+    .AddTypeActivatedCheck<GrpcDependencyHealthCheck>("orders-api", failureStatus: HealthStatus.Unhealthy, tags: ["grpc", "downstream", "ready"], args: "orders-health")
+    // Відгуки некритичні — їх недоступність робить Aggregator Degraded, а не Unhealthy
+    .AddTypeActivatedCheck<GrpcDependencyHealthCheck>("reviews-api", failureStatus: HealthStatus.Degraded, tags: ["grpc", "downstream", "ready"], args: "reviews-health")
+    .AddRedis(sp => sp.GetRequiredService<IConfiguration>().GetConnectionString("redis")!, name: "redis-cache",
+        failureStatus: HealthStatus.Degraded, tags: ["cache", "redis", "ready"], timeout: TimeSpan.FromSeconds(3));
+
+builder.Services.AddSingleton<AggregatorMetrics>();
 
 builder.Services.AddScoped<AggregationService>();
 builder.Services.AddScoped<GrpcAggregationService>();
