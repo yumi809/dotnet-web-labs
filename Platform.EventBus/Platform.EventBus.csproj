@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Platform.EventBus</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <!-- Aspire-інтеграція реєструє IConnection (RabbitMQ.Client 7.x) з health check і телеметрією -->
+    <PackageReference Include="Aspire.RabbitMQ.Client" Version="13.6.5" />
+    <PackageReference Include="OpenTelemetry.Api" Version="1.20.0" />
+    <PackageReference Include="Serilog" Version="4.3.0" />
+  </ItemGroup>
+</Project>
