@@ -79,6 +79,70 @@ mongosh "mongodb://localhost:27017" db/p3/seed.js
 | `IX_ProductCategories_CategoryId_AddedAt` (CatalogDb) | новинки категорії |
 | `ix_reviews_product_created`, `ux_reviews_product_author`, `tx_reviews_text` (MongoDB) | відгуки товару; один відгук на користувача; повнотекстовий пошук |
 
+## Запуск через .NET Aspire
+
+Потрібно: .NET 10 SDK, Docker Desktop (запущений).
+
+```bash
+dotnet run --project Platform.AppHost
+```
+
+AppHost піднімає контейнер SQL Server, створює базу `OrdersDb` (ім'я ресурсу = ім'я рядка підключення
+`ConnectionStrings:OrdersDb`) і запускає `orders-api` з `WithReference(ordersDb).WaitFor(ordersDb)`.
+У Development `Orders.Api` при старті виконує ідемпотентні скрипти `db/p1/*.sql`. Адреси сервісів — в Aspire Dashboard.
+
+## Сервіс Замовлень (Лаб. 02 — ADO.NET + Dapper)
+
+```
+Services/Orders/
+├── Orders.Api      контролери, глобальний обробник помилок (ProblemDetails), Program.cs, Swagger
+├── Orders.Bll      DTO + DataAnnotations, AutoMapper-профіль, сервіси (бізнес-правила, транзакції)
+├── Orders.Dal      IGenericRepository<T>, BaseDapperRepository<T>, Dapper/ADO.NET репозиторії, Unit of Work
+└── Orders.Domain   моделі, доменні винятки (NotFound / BusinessConflict / Validation)
+```
+
+Залежності лише в один бік: `Api → Bll → Dal → Domain`.
+
+| Компонент | Реалізація |
+|---|---|
+| `IGenericRepository<T>` | спільний CRUD; `IOrderRepository`, `ICustomerRepository` успадковують його й додають специфічні запити |
+| `BaseDapperRepository<T>` | CRUD написано один раз (SELECT/INSERT/UPDATE/м'яке видалення) |
+| `OrderRepository` (Dapper) | multi-mapping `Order + OrderItem`, виклик процедур `usp_Order_ChangeStatus`, `usp_Order_SoftDelete` |
+| `CustomerRepository` (Dapper) | multi-mapping 1:1 `Customer + CustomerProfile`, процедура `usp_Customer_GetOrderStats` |
+| `ProductDirectoryRepository` (чистий ADO.NET) | `SqlCommand` + параметри + ручне читання `SqlDataReader`, upsert довідника |
+| `UnitOfWork` | одне `SqlConnection` на запит, `BeginTransactionAsync(IsolationLevel)`, `CommitAsync`, `RollbackAsync`, `DisposeAsync` |
+| `OrderService.CreateAsync` | транзакція через 3 репозиторії (Orders, OrderItems, OrderStatusHistory), знімок ціни/назви, відкат при помилці |
+| `GlobalExceptionHandler` | NotFound → 404, BusinessConflict → 409, Validation → 400, інше → 500 |
+
+### Приклади запитів
+
+```bash
+# Створити клієнта
+curl -X POST https://localhost:7101/api/orders/customers -H "Content-Type: application/json" \
+     -d '{"email":"new.client@example.com","fullName":"Новий Клієнт","phone":"+380501234567"}'
+
+# Створити замовлення (201 + Location)
+curl -X POST https://localhost:7101/api/orders -H "Content-Type: application/json" \
+     -d '{"customerId":1,"items":[{"productId":1,"quantity":2},{"productId":3,"quantity":1}],"comment":"Доставка Новою поштою"}'
+
+# Отримати замовлення з позиціями
+curl https://localhost:7101/api/orders/1
+
+# Змінити статус (недопустимий перехід → 409 ProblemDetails)
+curl -X PATCH https://localhost:7101/api/orders/1/status -H "Content-Type: application/json" \
+     -d '{"status":"Confirmed","reason":"Оплата очікується"}'
+
+# Історія статусів, замовлення клієнта, статистика
+curl https://localhost:7101/api/orders/1/history
+curl "https://localhost:7101/api/orders?customerId=1"
+curl https://localhost:7101/api/orders/customers/1/stats
+
+# М'яке видалення (204)
+curl -X DELETE https://localhost:7101/api/orders/2
+```
+
+Swagger UI: `https://localhost:7101/swagger`.
+
 ## Структура репозиторію
 
 ```
@@ -87,4 +151,7 @@ docs/                ERD-діаграми, опис контекстів, при
 db/p1/               OrdersDb: schema.sql · procedures.sql · seed.sql
 db/p2/               CatalogDb: schema.sql · seed.sql
 db/p3/               ReviewsDb: collections.js · seed.js
+Platform.slnx        одне рішення на всю платформу
+Platform.AppHost/    оркестрація Aspire (AppHost.cs)
+Services/Orders/     Проєкт №1 — ADO.NET + Dapper
 ```
