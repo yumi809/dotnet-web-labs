@@ -24,8 +24,12 @@ public static class Extensions
     /// <summary>Префікс ActivitySource/Meter усіх бізнес-компонентів платформи.</summary>
     public const string TelemetryPrefix = "BookHub";
 
-    /// <summary>Власні Meter-и сервісів платформи, що експортуються в Aspire Dashboard.</summary>
-    public static readonly string[] PlatformMeters = ["Catalog.Cache", $"{TelemetryPrefix}.*"];
+    /// <summary>
+    /// Meter-и, що експортуються в Aspire Dashboard: бізнес-метрики сервісів (Orders.Api, Catalog.Api, Reviews.Api),
+    /// метрики кешу (Catalog.Cache), Aggregator і телеметрія resilience-подій Polly.
+    /// </summary>
+    public static readonly string[] PlatformMeters =
+        ["Orders.Api", "Catalog.Api", "Reviews.Api", "Catalog.Cache", "Platform.Aggregator", "Polly", $"{TelemetryPrefix}.*"];
 
     public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
@@ -37,7 +41,10 @@ public static class Extensions
         builder.Services.AddServiceDiscovery();
         builder.Services.ConfigureHttpClientDefaults(http =>
         {
-            http.AddStandardResilienceHandler();                     // retry, circuit breaker, timeouts (Polly)
+            // Standard Resilience Handler (Polly) для ВСІХ HttpClient, у т.ч. gRPC-клієнтів, що створює та сама фабрика:
+            // rate limiter → total timeout → retry → circuit breaker → attempt timeout.
+            // Клієнти з власними вимогами спершу викликають RemoveAllResilienceHandlers(), щоб обробники не нашаровувались.
+            http.AddStandardResilienceHandler();
             http.AddServiceDiscovery();                              // https+http://orders-api → реальна адреса
             http.AddHttpMessageHandler<CorrelationIdDelegatingHandler>(); // X-Correlation-Id у вихідних запитах
         });
@@ -119,14 +126,31 @@ public static class Extensions
         return app;
     }
 
-    /// <summary>Health endpoints платформи.</summary>
+    public const string LivenessEndpointPath = "/health/live";
+    public const string ReadinessEndpointPath = "/health/ready";
+
+    /// <summary>
+    /// Health endpoints платформи — зареєстровані в УСІХ середовищах (їх використовують проби Kubernetes, Лаб. 10):
+    /// <list type="bullet">
+    /// <item>/health/live — лише перевірки з тегом "live" (стан процесу, без зовнішніх залежностей, &lt; 100 мс);</item>
+    /// <item>/health/ready — перевірки з тегом "ready" (БД, кеш, gRPC-залежності) з JSON-деталями кожної перевірки;</item>
+    /// <item>/health і /alive — сумісність із шаблоном Aspire.</item>
+    /// </list>
+    /// </summary>
     public static WebApplication MapDefaultEndpoints(this WebApplication app)
     {
-        if (app.Environment.IsDevelopment())
+        app.MapHealthChecks(LivenessEndpointPath, new HealthCheckOptions
         {
-            app.MapHealthChecks(HealthEndpointPath);
-            app.MapHealthChecks(AlivenessEndpointPath, new HealthCheckOptions { Predicate = r => r.Tags.Contains("live") });
-        }
+            Predicate = check => check.Tags.Contains("live"),
+            ResponseWriter = HealthResponseWriter.WriteJsonAsync
+        });
+        app.MapHealthChecks(ReadinessEndpointPath, new HealthCheckOptions
+        {
+            Predicate = check => check.Tags.Contains("ready"),
+            ResponseWriter = HealthResponseWriter.WriteJsonAsync
+        });
+        app.MapHealthChecks(HealthEndpointPath, new HealthCheckOptions { ResponseWriter = HealthResponseWriter.WriteJsonAsync });
+        app.MapHealthChecks(AlivenessEndpointPath, new HealthCheckOptions { Predicate = r => r.Tags.Contains("live") });
         return app;
     }
 }
