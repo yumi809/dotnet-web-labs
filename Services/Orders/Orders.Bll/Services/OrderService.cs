@@ -21,7 +21,8 @@ public interface IOrderService
     Task<IReadOnlyDictionary<string, long>> CountByStatusAsync(CancellationToken ct);
 }
 
-public sealed class OrderService(IUnitOfWork uow, IMapper mapper, IOrderMetrics metrics, ILogger<OrderService> logger) : IOrderService
+public sealed class OrderService(
+    IUnitOfWork uow, IMapper mapper, IOrderMetrics metrics, Events.IOrderEventsPublisher events, ILogger<OrderService> logger) : IOrderService
 {
     public Task<IReadOnlyDictionary<string, long>> CountByStatusAsync(CancellationToken ct) => uow.Orders.CountByStatusAsync(ct);
 
@@ -47,6 +48,16 @@ public sealed class OrderService(IUnitOfWork uow, IMapper mapper, IOrderMetrics 
     {
         var created = await MeasureAsync("create", () => CreateCoreAsync(dto, user, ct));
         metrics.OrderCreated(created.Status);
+
+        // Подія публікується лише ПІСЛЯ успішного Commit: при збої БД виняток вище, і сюди виконання не дійде
+        try
+        {
+            await events.OrderCreatedAsync(created, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to publish OrderCreated for order {OrderId} ({OrderNumber})", created.Id, created.OrderNumber);
+        }
         return created;
     }
 

@@ -31,7 +31,10 @@ public sealed class UnitOfWork : IUnitOfWork, IDbSession
         Customers = new CustomerRepository(this);
         StatusHistory = new OrderStatusHistoryRepository(this);
         Products = new ProductDirectoryRepository(this, loggerFactory.CreateLogger<ProductDirectoryRepository>());
+        ProcessedEvents = new ProcessedEventRepository(this);
     }
+
+    public IProcessedEventRepository ProcessedEvents { get; }
 
     public IOrderRepository Orders { get; }
     public ICustomerRepository Customers { get; }

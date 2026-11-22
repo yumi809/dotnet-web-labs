@@ -37,6 +37,12 @@ public interface IOrderStatusHistoryRepository
     Task<IReadOnlyList<OrderStatusHistory>> GetByOrderAsync(long orderId, CancellationToken ct = default);
 }
 
+/// <summary>Ідемпотентність споживачів подій: повертає false, якщо EventId вже оброблено.</summary>
+public interface IProcessedEventRepository
+{
+    Task<bool> TryMarkProcessedAsync(Guid eventId, string eventType, CancellationToken ct = default);
+}
+
 /// <summary>
 /// Локальний довідник товарів. Реалізація — на чистому ADO.NET і свідомо не успадковує Generic Repository:
 /// ключ приходить із Каталогу, а операція запису — upsert, а не Insert/Update.

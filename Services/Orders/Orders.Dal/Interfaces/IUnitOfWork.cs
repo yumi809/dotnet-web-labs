@@ -12,6 +12,7 @@ public interface IUnitOfWork : IAsyncDisposable
     ICustomerRepository Customers { get; }
     IOrderStatusHistoryRepository StatusHistory { get; }
     IProductDirectoryRepository Products { get; }
+    IProcessedEventRepository ProcessedEvents { get; }
 
     bool HasActiveTransaction { get; }
     Task BeginTransactionAsync(IsolationLevel isolationLevel = IsolationLevel.ReadCommitted, CancellationToken ct = default);

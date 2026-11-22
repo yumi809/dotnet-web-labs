@@ -1,5 +1,9 @@
 using Orders.Api.Grpc;
 using Orders.Api.HealthChecks;
+using Orders.Api.IntegrationEvents;
+using Orders.Bll.Events;
+using Platform.EventBus;
+using Platform.EventBus.Events;
 using Orders.Api.Infrastructure;
 using Orders.Api.Metrics;
 using Orders.Bll;
@@ -13,6 +17,12 @@ builder.AddServiceDefaults();
 
 // BLL + DAL: Unit of Work і сервіси — Scoped; рядок підключення ConnectionStrings:OrdersDb (з AppHost)
 builder.Services.AddOrdersBll();
+
+// RabbitMQ: публікація OrderCreated після Commit; споживання ProductUpdated (реплікація довідника товарів)
+builder.AddEventBus();
+builder.Services.AddScoped<IOrderEventsPublisher, OrderEventsPublisher>();
+builder.AddEventConsumer("orders-api.events")
+    .Subscribe<ProductUpdatedIntegrationEvent, ProductUpdatedHandler>("catalog.product.updated");
 
 // Бізнес-метрики (Singleton, Meter "Orders.Api") + знімок стану для gauge
 builder.Services.AddSingleton<OrdersSnapshot>();
