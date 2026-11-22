@@ -1,4 +1,4 @@
-# BookHub — мікросервісна платформа книжкового інтернет-магазину
+﻿# BookHub — мікросервісна платформа книжкового інтернет-магазину
 
 Курс «Технології .NET розробки web-додатків». Один репозиторій на весь курс: кожна лабораторна — окрема гілка `lab-NN`.
 
@@ -143,6 +143,43 @@ curl -X DELETE https://localhost:7101/api/orders/2
 
 Swagger UI: `https://localhost:7101/swagger`.
 
+## Сервіс Каталогу (Лаб. 03 — EF Core Code First)
+
+```
+Services/Catalog/
+├── Catalog.Api      контролери, GlobalExceptionHandler, Serilog, Program.cs
+├── Catalog.Bll      DTO, FluentValidation-валідатори, специфікації, AutoMapper, сервіси
+├── Catalog.Dal      CatalogDbContext, Configurations/, Migrations/, репозиторії, Unit of Work, Seeding/
+└── Catalog.Domain   сутності з інкапсульованими правилами (Product.AddStock/RemoveStock/ChangePrice)
+```
+
+| Вимога | Реалізація |
+|---|---|
+| Fluent API | окремі `IEntityTypeConfiguration<T>`, `ApplyConfigurationsFromAssembly`; `decimal(18,2)`, унікальні індекси, CHECK |
+| Зв'язки | 1:N `Publisher → Product`, 1:1 `Product → ProductDetail` (FK = PK), M:N через `ProductCategory` (складений ключ + `AddedAt`, `IsPrimary`) |
+| Міграції | `Catalog.Dal/Migrations/*_InitialCreate.cs` + знімок моделі + `InitialCreate.sql` (ідемпотентний скрипт) |
+| Репозиторії | `GenericRepository<T>` на `DbSet`; `ProductRepository` — Eager (`Include/ThenInclude`), `PublisherRepository` — Explicit (`Entry().Collection().LoadAsync`), `CategoryRepository` — LINQ M:N за `AddedAt` |
+| Unit of Work | репозиторії лише змінюють стан, зберігає один `SaveChangesAsync` |
+| Сідінг | `HasData` для довідника категорій; `DbInitializer` після `MigrateAsync` з перевіркою наявності; вимикається `Catalog:SeedData=false` |
+| Запити | `ProductFilterSpecification`: фільтри, сортування за білим списком полів, `Skip/Take` до `ToListAsync`; відповідь з `totalCount`, `totalPages`, `hasNext`, `hasPrevious` |
+| Валідація | DataAnnotations на DTO + валідатори FluentValidation (`AddValidatorsFromAssembly`, явний `ValidateAndThrowAsync`) → `ValidationProblemDetails` |
+| Логування | Serilog (Console sink, `FromLogContext`, `WithMachineName`), SQL-команди EF Core, `UseSerilogRequestLogging` |
+
+```bash
+# Міграції (з кореня репозиторію)
+dotnet tool restore
+dotnet ef migrations add <Name> --project Services/Catalog/Catalog.Dal --startup-project Services/Catalog/Catalog.Dal
+
+# Приклади запитів
+curl "https://localhost:7102/api/catalog/products?page=1&pageSize=5&categoryId=2&sortBy=price&sortDir=desc"
+curl https://localhost:7102/api/catalog/products/1
+curl -X POST https://localhost:7102/api/catalog/products -H "Content-Type: application/json" \
+     -d '{"sku":"BK-0100","name":"Intermezzo","author":"Михайло Коцюбинський","price":210,"stockQuantity":15,"publisherId":1,"categoryIds":[2],"detail":{"isbn":"978-966-448-100-1","pages":64,"language":"uk","publishedYear":2022}}'
+curl -X POST https://localhost:7102/api/catalog/products/1/stock/remove -H "Content-Type: application/json" -d '{"quantity":3}'
+curl https://localhost:7102/api/catalog/publishers/1
+curl "https://localhost:7102/api/catalog/categories/2/new-arrivals?days=30"
+```
+
 ## Структура репозиторію
 
 ```
@@ -154,4 +191,5 @@ db/p3/               ReviewsDb: collections.js · seed.js
 Platform.slnx        одне рішення на всю платформу
 Platform.AppHost/    оркестрація Aspire (AppHost.cs)
 Services/Orders/     Проєкт №1 — ADO.NET + Dapper
+Services/Catalog/    Проєкт №2 — EF Core
 ```

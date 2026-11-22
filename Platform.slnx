@@ -8,4 +8,10 @@
     <Project Path="Services/Orders/Orders.Dal/Orders.Dal.csproj" />
     <Project Path="Services/Orders/Orders.Domain/Orders.Domain.csproj" />
   </Folder>
+  <Folder Name="/Services/Catalog/">
+    <Project Path="Services/Catalog/Catalog.Api/Catalog.Api.csproj" />
+    <Project Path="Services/Catalog/Catalog.Bll/Catalog.Bll.csproj" />
+    <Project Path="Services/Catalog/Catalog.Dal/Catalog.Dal.csproj" />
+    <Project Path="Services/Catalog/Catalog.Domain/Catalog.Domain.csproj" />
+  </Folder>
 </Solution>
