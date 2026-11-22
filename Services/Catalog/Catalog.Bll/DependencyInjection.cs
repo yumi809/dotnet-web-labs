@@ -1,3 +1,4 @@
+using Catalog.Bll.Caching;
 using Catalog.Bll.Mapping;
 using Catalog.Bll.Services;
 using Catalog.Dal;
@@ -16,6 +17,16 @@ public static class DependencyInjection
         services.AddAutoMapper(cfg => { }, typeof(CatalogMappingProfile).Assembly);
         // Валідатори FluentValidation — окремі класи, викликаються явно в сервісах (без застарілого AddFluentValidation)
         services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
+        // L1: IMemoryCache з обмеженням розміру (кожен запис має Size = 1); L2 (IDistributedCache) реєструє
+        // Aspire-інтеграція AddRedisDistributedCache("redis") у Program.cs
+        services.AddMemoryCache(o =>
+        {
+            o.SizeLimit = 1_000;
+            o.CompactionPercentage = 0.2;           // при переповненні витісняється 20% найменш цінних записів
+            o.ExpirationScanFrequency = TimeSpan.FromMinutes(1);
+        });
+        services.AddSingleton<CacheMetrics>();
+        services.AddScoped<ICatalogCache, TwoLevelCache>();
         services.AddScoped<IProductService, ProductService>();
         services.AddScoped<IPublisherService, PublisherService>();
         services.AddScoped<ICategoryService, CategoryService>();
