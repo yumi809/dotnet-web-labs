@@ -14,10 +14,27 @@ public sealed record CreateReviewCommand(
     long ProductId, string ProductName, string AuthorId, string AuthorName, int Rating, string Type,
     string Title, string? Body, List<string>? Pros, List<string>? Cons, string? VideoUrl) : ICommand<string>;
 
-public sealed class CreateReviewHandler(IReviewRepository repository, ILogger<CreateReviewHandler> logger)
+public sealed class CreateReviewHandler(IReviewRepository repository, IReviewMetrics metrics, ILogger<CreateReviewHandler> logger)
     : IRequestHandler<CreateReviewCommand, string>
 {
     public async Task<string> Handle(CreateReviewCommand c, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var id = await CreateAsync(c, ct);
+            metrics.RecordDuration("create", true, sw.Elapsed.TotalMilliseconds);
+            metrics.ReviewCreated(c.Type, c.Rating);
+            return id;
+        }
+        catch
+        {
+            metrics.RecordDuration("create", false, sw.Elapsed.TotalMilliseconds);
+            throw;
+        }
+    }
+
+    private async Task<string> CreateAsync(CreateReviewCommand c, CancellationToken ct)
     {
         using var activity = ReviewsTelemetry.ActivitySource.StartActivity("reviews.create");
         activity?.SetTag("product.id", c.ProductId);

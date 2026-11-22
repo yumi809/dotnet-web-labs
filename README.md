@@ -155,6 +155,66 @@ curl http://localhost:5000/api/aggregator/v2/products/3          # перший 
 curl http://localhost:5000/api/aggregator/v2/orders/1/details
 ```
 
+## Резильєнтність, бізнес-метрики та Health Checks (Лаб. 07)
+
+### Політики стійкості клієнтів Aggregator
+
+Усі `HttpClient` (і gRPC-клієнти, бо їх створює та сама фабрика) отримують **Standard Resilience Handler** через
+`ConfigureHttpClientDefaults` у `Platform.ServiceDefaults`. Клієнти з іншими вимогами спершу викликають
+`RemoveAllResilienceHandlers()`, а потім додають власний конвеєр (`Platform.Aggregator/Resilience/ResiliencePolicies.cs`) —
+обробники не нашаровуються.
+
+| Клієнт | Критичність | Retry | Circuit breaker | Таймаути | Обґрунтування |
+|---|---|---|---|---|---|
+| `CatalogClient`, `CatalogService` (gRPC) | **критичний** | 5 повторів, експоненційно від 0.5 с, jitter, лише безпечні методи | FailureRatio **0.3**, MinimumThroughput 10, SamplingDuration 30 с, BreakDuration 15 с, лог OnOpened/OnClosed/OnHalfOpened | спроба 3 с, загальний 30 с | без товарів картку не зібрати — варто зачекати довше; чутливіший breaker швидше захищає Каталог від лавини запитів; 5 × 3 с + затримки (~15.5 с) вкладаються в 30 с |
+| `ReviewsClient`, `ReviewsService` (gRPC) | некритичний | 1 повтор, 0.2 с, jitter | FailureRatio **0.7**, MinimumThroughput 10, SamplingDuration 10 с, BreakDuration 10 с | спроба 2 с, загальний 5 с | без відгуків Aggregator повертає часткову відповідь — краще швидко здатися й показати warning |
+| `OrdersClient`, `OrdersService` (gRPC) | стандартний | Standard Handler: 3 повтори, від 2 с, jitter | 10 % при ≥ 100 запитів / 30 с, 5 с | спроба 10 с, загальний 30 с | замовлення — обов'язкова частина «картки замовлення», стандартних налаштувань достатньо |
+
+* **gRPC-статуси**: `Unavailable`/`DeadlineExceeded` приходять у трейлерах з HTTP 200, тож HTTP-обробник їх не повторює.
+  Для них — `ServiceConfig` з `RetryPolicy` каналу (`WithGrpcRetry`): Catalog 4 спроби, Orders 3, Reviews 2;
+  `RetryableStatusCodes = Unavailable, ResourceExhausted`.
+* **Write-операції** не повторюються (`DisableForUnsafeHttpMethods`), щоб не створити замовлення двічі.
+* Телеметрія resilience — Meter `Polly` (`resilience.polly.strategy.events` з тегом `event.name`: OnRetry, OnCircuitOpened…).
+
+### Graceful degradation Redis
+
+`Catalog.Bll/Caching/TwoLevelCache.cs` і `Platform.Aggregator/Services/GrpcAggregationService.cs`: кожна операція з Redis у
+`try/catch (RedisConnectionException | RedisTimeoutException | RedisException)` — збій логується Warning, запит не падає,
+дані читаються з БД / сервісів. Health check Redis має статус **Degraded**, а не Unhealthy.
+
+### Бізнес-метрики (Meter API, `IMeterFactory`, Singleton)
+
+| Meter | Інструменти | Теги (низька кардинальність) |
+|---|---|---|
+| `Orders.Api` (`Orders.Api/Metrics/OrderMetrics.cs`) | `orders.created` (Counter), `orders.status_changed` (Counter), `orders.operation.duration` (Histogram, ms), `orders.awaiting_confirmation`, `orders.awaiting_shipment` (ObservableGauge) | `order.status`, `order.status.from/to`, `operation`, `status` |
+| `Catalog.Api` (`Catalog.Api/Metrics/CatalogMetrics.cs`) | `products.created`, `products.price_changed`, `products.stock_moved`, `catalog.operation.duration`, `products.low_stock` (Gauge) | `product.category`, `direction`, `operation`, `status` |
+| `Reviews.Api` (`Reviews.WebApi/Metrics/ReviewMetrics.cs`) | `reviews.created`, `reviews.operation.duration`, `reviews.average_rating` (Gauge) | `review.type`, `review.rating` (1..5) |
+| `Catalog.Cache` | `cache.hits`, `cache.misses`, `cache.invalidations` | `cache.level` (L1/L2), `cache.entity` |
+| `Platform.Aggregator` | `aggregator.requests`, `aggregator.duration` | `scenario`, `result` |
+
+Тривалість записується і для успішних, і для невдалих операцій. Ідентифікатори користувачів/замовлень у теги не потрапляють.
+Нормальні діапазони: `orders.operation.duration` p95 < 300 мс; частка `cache.misses{L2}` < 30 %; `orders.awaiting_confirmation` < 50.
+
+### Health checks
+
+| Сервіс | Перевірки (`/health/ready`) |
+|---|---|
+| orders-api | `orders-db` (SQL Server, `SELECT 1`, 5 с) |
+| catalog-api | `catalog-db` (SQL Server), `redis-cache` (PING, 3 с, **Degraded**) |
+| reviews-api | `reviews-db` (MongoDB ping, 5 с) |
+| aggregator | `catalog-api`, `orders-api`, `reviews-api` (gRPC Health Checking Protocol, дедлайн 2 с; Reviews → Degraded), `redis-cache` (Degraded) |
+
+* `/health/live` — лише тег `live` (процес живий, без зовнішніх залежностей); `/health/ready` — тег `ready`, JSON з деталями
+  кожної перевірки. Обидва endpoint-и зареєстровані **в усіх середовищах** (потрібні пробам Kubernetes, Лаб. 10).
+* Кожен сервіс публікує `AddGrpcHealthChecks()` + `MapGrpcHealthChecksService()`.
+* AppHost: `WithHttpHealthCheck("/health/ready")` — Dashboard показує стан ресурсів, `WaitFor` чекає здорову залежність.
+
+```bash
+curl http://localhost:5000/api/aggregator/v2/products/3     # зупиніть reviews-api в Dashboard → 200 + warnings
+curl https://localhost:<catalog-port>/health/ready         # зупиніть Redis → "Degraded"
+curl https://localhost:<orders-port>/health/live           # зупиніть SQL Server → live 200, ready 503
+```
+
 ## Сервіс Замовлень (Лаб. 02 — ADO.NET + Dapper)
 
 ```

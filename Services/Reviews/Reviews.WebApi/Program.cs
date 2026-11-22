@@ -2,6 +2,8 @@ using Reviews.Application;
 using Reviews.Infrastructure;
 using Platform.ServiceDefaults.Grpc;
 using Reviews.WebApi.Grpc;
+using Reviews.WebApi.HealthChecks;
+using Reviews.WebApi.Metrics;
 using Reviews.WebApi.Infrastructure;
 using Serilog;
 
@@ -12,6 +14,9 @@ builder.Services.AddApplication();                                // MediatR + b
 builder.Services.AddInfrastructure(builder.Configuration);        // MongoDB (ConnectionStrings:ReviewsDb / секція MongoDb)
 builder.Services.AddAutoMapper(cfg => { }, typeof(Program).Assembly); // request → command
 
+builder.Services.AddSingleton<ReviewMetrics>();
+builder.Services.AddSingleton<IReviewMetrics>(sp => sp.GetRequiredService<ReviewMetrics>());
+builder.Services.AddReviewsHealthChecks();               // reviews-db (MongoDB ping) + gRPC health
 builder.Services.AddGrpc(o => o.Interceptors.Add<ServerLoggingInterceptor>());
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
@@ -33,5 +38,6 @@ if (app.Environment.IsDevelopment())
 
 app.MapControllers();
 app.MapGrpcService<ReviewsGrpcService>();
+app.MapGrpcHealthChecksService();
 app.MapDefaultEndpoints();
 app.Run();

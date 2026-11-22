@@ -21,26 +21,34 @@ var redis = builder.AddRedis("redis")
     .WithLifetime(ContainerLifetime.Persistent);
 
 // ---------- Мікросервіси (БД → сервіси) ----------
+// WithHttpHealthCheck: Dashboard показує стан ресурсу (Healthy / Degraded / Unhealthy),
+// а WaitFor у залежних ресурсів чекає, поки сервіс стане ЗДОРОВИМ, а не лише запуститься.
+const string ReadinessPath = "/health/ready";
+
 var ordersApi = builder.AddProject<Projects.Orders_Api>("orders-api")
     .WithReference(ordersDb)
-    .WaitFor(ordersDb);
+    .WaitFor(ordersDb)
+    .WithHttpHealthCheck(ReadinessPath);
 
 var catalogApi = builder.AddProject<Projects.Catalog_Api>("catalog-api")
     .WithReference(catalogDb)
     .WaitFor(catalogDb)
     .WithReference(redis)
-    .WaitFor(redis);
+    .WaitFor(redis)
+    .WithHttpHealthCheck(ReadinessPath);
 
 var reviewsApi = builder.AddProject<Projects.Reviews_WebApi>("reviews-api")
     .WithReference(reviewsDb)
-    .WaitFor(reviewsDb);
+    .WaitFor(reviewsDb)
+    .WithHttpHealthCheck(ReadinessPath);
 
 // ---------- Aggregator (сервіси → Aggregator) ----------
 var aggregator = builder.AddProject<Projects.Platform_Aggregator>("aggregator")
     .WithReference(redis).WaitFor(redis)
     .WithReference(ordersApi).WaitFor(ordersApi)
     .WithReference(catalogApi).WaitFor(catalogApi)
-    .WithReference(reviewsApi).WaitFor(reviewsApi);
+    .WithReference(reviewsApi).WaitFor(reviewsApi)
+    .WithHttpHealthCheck(ReadinessPath);
 
 // ---------- API Gateway (Aggregator → Gateway), фіксований порт ----------
 builder.AddProject<Projects.Platform_ApiGateway>("gateway", launchProfileName: null)
@@ -50,6 +58,7 @@ builder.AddProject<Projects.Platform_ApiGateway>("gateway", launchProfileName: n
     .WithReference(catalogApi)
     .WithReference(reviewsApi)
     .WithReference(aggregator)
-    .WaitFor(aggregator);
+    .WaitFor(aggregator)
+    .WithHttpHealthCheck("/health/live");
 
 builder.Build().Run();
