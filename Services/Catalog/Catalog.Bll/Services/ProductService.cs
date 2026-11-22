@@ -1,6 +1,7 @@
 using AutoMapper;
 using Catalog.Bll.Caching;
 using Catalog.Bll.Dto;
+using Catalog.Bll.Events;
 using Catalog.Bll.Specifications;
 using Catalog.Dal;
 using Catalog.Domain.Entities;
@@ -31,8 +32,26 @@ public sealed class ProductService(
     IValidator<ProductQueryDto> queryValidator,
     ICatalogCache cache,
     ICatalogMetrics metrics,
+    IProductEventsPublisher events,
     ILogger<ProductService> logger) : IProductService
 {
+    /// <summary>
+    /// Публікація ПІСЛЯ успішного SaveChanges. Збій брокера не відкочує вже збережені зміни — він логується
+    /// з бізнес-контекстом (гарантовану доставку дав би Transactional Outbox).
+    /// </summary>
+    private async Task PublishChangedAsync(long productId, decimal? oldPrice, CancellationToken ct)
+    {
+        try
+        {
+            var product = await GetAsync(productId, ct);
+            await events.ProductChangedAsync(product, oldPrice, ct);
+        }
+        catch (Exception ex) when (ex is not NotFoundException)
+        {
+            logger.LogError(ex, "Failed to publish ProductUpdated for product {ProductId}", productId);
+        }
+    }
+
     /// <summary>Тривалість операцій запису записується і для успішних, і для невдалих виконань.</summary>
     private async Task<T> MeasureAsync<T>(string operation, Func<Task<T>> action)
     {
@@ -113,6 +132,7 @@ public sealed class ProductService(
         await uow.SaveChangesAsync(ct);
         await cache.BumpListVersionAsync("product created", ct);
         logger.LogInformation("Product {ProductId} {Sku} created", product.Id, product.Sku);
+        await PublishChangedAsync(product.Id, null, ct);
         return await GetAsync(product.Id, ct);
     }
 
@@ -135,6 +155,7 @@ public sealed class ProductService(
         await uow.SaveChangesAsync(ct);
         await InvalidateAsync(id, "product updated", ct);
         metrics.PriceChanged(oldPrice, dto.Price);
+        await PublishChangedAsync(id, oldPrice, ct);
         logger.LogInformation("Product {ProductId} updated, price {OldPrice} -> {NewPrice}", id, oldPrice, dto.Price);
         return await GetAsync(id, ct);
     }
@@ -165,6 +186,7 @@ public sealed class ProductService(
         product.Deactivate(); // м'яке видалення: книга лишається в історії замовлень
         await uow.SaveChangesAsync(ct);
         await InvalidateAsync(id, "product deleted", ct);
+        await PublishChangedAsync(id, null, ct);   // IsActive = false → у довіднику Замовлень товар стане недоступним
         logger.LogInformation("Product {ProductId} deactivated", id);
     }
 

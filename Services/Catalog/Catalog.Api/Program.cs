@@ -1,5 +1,9 @@
 using Catalog.Api.Grpc;
 using Catalog.Api.HealthChecks;
+using Catalog.Api.IntegrationEvents;
+using Catalog.Bll.Events;
+using Platform.EventBus;
+using Platform.EventBus.Events;
 using Catalog.Api.Infrastructure;
 using Catalog.Api.Metrics;
 using Platform.ServiceDefaults.Grpc;
@@ -16,6 +20,13 @@ builder.Services.AddCatalogBll(builder.Configuration); // ConnectionStrings:Cata
 
 // L2-кеш: IDistributedCache поверх Redis через Aspire-інтеграцію (ConnectionStrings:redis)
 builder.AddRedisDistributedCache("redis");
+
+// RabbitMQ (Aspire.RabbitMQ.Client, ресурс "messaging"): публікація ProductUpdated/PriceChanged після SaveChanges
+// і споживання OrderCreated (резервування запасу) з власної черги catalog-api.events
+builder.AddEventBus();
+builder.Services.AddScoped<IProductEventsPublisher, ProductEventsPublisher>();
+builder.AddEventConsumer("catalog-api.events")
+    .Subscribe<OrderCreatedIntegrationEvent, OrderCreatedHandler>("orders.order.created");
 
 // Бізнес-метрики (Meter "Catalog.Api") + знімок стану для gauge
 builder.Services.AddSingleton<CatalogSnapshot>();

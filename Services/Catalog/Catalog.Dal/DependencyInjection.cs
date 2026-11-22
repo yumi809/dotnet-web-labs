@@ -20,6 +20,7 @@ public static class DependencyInjection
         services.AddScoped<IProductRepository, ProductRepository>();
         services.AddScoped<IPublisherRepository, PublisherRepository>();
         services.AddScoped<ICategoryRepository, CategoryRepository>();
+        services.AddScoped<Messaging.IProcessedEventRepository, Messaging.ProcessedEventRepository>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<DbInitializer>();
         return services;

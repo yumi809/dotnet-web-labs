@@ -188,3 +188,29 @@ END;
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261122234033_AddProcessedEvents'
+)
+BEGIN
+    CREATE TABLE [ProcessedEvents] (
+        [EventId] uniqueidentifier NOT NULL,
+        [EventType] nvarchar(200) NOT NULL,
+        [ProcessedAt] datetime2 NOT NULL DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT [PK_ProcessedEvents] PRIMARY KEY ([EventId])
+    );
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261122234033_AddProcessedEvents'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20261122234033_AddProcessedEvents', N'10.0.11');
+END;
+
+COMMIT;
+GO
+

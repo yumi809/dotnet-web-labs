@@ -22,6 +22,26 @@ namespace Catalog.Dal.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("Catalog.Dal.Messaging.ProcessedEvent", b =>
+                {
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("ProcessedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.HasKey("EventId");
+
+                    b.ToTable("ProcessedEvents", (string)null);
+                });
+
             modelBuilder.Entity("Catalog.Domain.Entities.Category", b =>
                 {
                     b.Property<int>("Id")

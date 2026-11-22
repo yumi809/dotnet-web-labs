@@ -28,6 +28,7 @@ public static class DependencyInjection
         services.AddSingleton<CacheMetrics>();
         services.AddScoped<ICatalogCache, TwoLevelCache>();
         services.AddScoped<IProductService, ProductService>();
+        services.AddScoped<IStockReservationService, StockReservationService>();
         services.AddScoped<IPublisherService, PublisherService>();
         services.AddScoped<ICategoryService, CategoryService>();
         return services;
