@@ -1,4 +1,6 @@
+using Catalog.Api.Grpc;
 using Catalog.Api.Infrastructure;
+using Platform.ServiceDefaults.Grpc;
 using Catalog.Bll;
 using Serilog;
 
@@ -9,6 +11,13 @@ var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
 
 builder.Services.AddCatalogBll(builder.Configuration); // ConnectionStrings:CatalogDb з AppHost
+
+// L2-кеш: IDistributedCache поверх Redis через Aspire-інтеграцію (ConnectionStrings:redis)
+builder.AddRedisDistributedCache("redis");
+
+// gRPC (HTTP/2) з серверним interceptor-ом логування
+builder.Services.AddGrpc(o => o.Interceptors.Add<ServerLoggingInterceptor>());
+
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
@@ -33,5 +42,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapGrpcService<CatalogGrpcService>();
 app.MapDefaultEndpoints();
 app.Run();

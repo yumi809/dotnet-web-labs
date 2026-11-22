@@ -1,4 +1,6 @@
+using Orders.Api.Grpc;
 using Orders.Api.Infrastructure;
+using Platform.ServiceDefaults.Grpc;
 using Orders.Bll;
 using Serilog;
 
@@ -10,6 +12,7 @@ builder.AddServiceDefaults();
 // BLL + DAL: Unit of Work і сервіси — Scoped; рядок підключення ConnectionStrings:OrdersDb (з AppHost)
 builder.Services.AddOrdersBll();
 
+builder.Services.AddGrpc(o => o.Interceptors.Add<ServerLoggingInterceptor>());
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
@@ -33,5 +36,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapGrpcService<OrdersGrpcService>();
 app.MapDefaultEndpoints();
 app.Run();

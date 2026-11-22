@@ -24,6 +24,9 @@ public static class Extensions
     /// <summary>Префікс ActivitySource/Meter усіх бізнес-компонентів платформи.</summary>
     public const string TelemetryPrefix = "BookHub";
 
+    /// <summary>Власні Meter-и сервісів платформи, що експортуються в Aspire Dashboard.</summary>
+    public static readonly string[] PlatformMeters = ["Catalog.Cache", $"{TelemetryPrefix}.*"];
+
     public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
         builder.ConfigureSerilog();
@@ -78,7 +81,7 @@ public static class Extensions
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation()
-                .AddMeter($"{TelemetryPrefix}.*"))
+                .AddMeter(PlatformMeters))
             .WithTracing(tracing => tracing
                 .AddSource(builder.Environment.ApplicationName)
                 .AddSource($"{TelemetryPrefix}.*")                                  // власні ActivitySource бізнес-операцій

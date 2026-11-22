@@ -135,6 +135,26 @@ curl http://localhost:5000/api/aggregator/products/3
 | OpenTelemetry: ASP.NET Core, HttpClient, SqlClient, MongoDB DiagnosticSources, власні `ActivitySource` `BookHub.*`, `UseOtlpExporter` | `Platform.ServiceDefaults/Extensions.cs` |
 | Власні spans бізнес-операцій | `OrdersTelemetry`, `CatalogTelemetry`, `ReviewsTelemetry` |
 
+## gRPC і дворівневе кешування (Лаб. 06)
+
+| Компонент | Реалізація |
+|---|---|
+| Redis | `AddRedis("redis").WithDataVolume()` в AppHost; `catalog-api` і `aggregator` — `WithReference(redis).WaitFor(redis)` |
+| L1 | `AddMemoryCache(SizeLimit = 1000)`, кожен запис `Size = 1`, sliding + absolute expiration |
+| L2 | `AddRedisDistributedCache("redis")`, System.Text.Json, префікс `catalog:`, TTL за типом даних (`CacheTtl`) |
+| Cache-aside | `TwoLevelCache.GetOrCreateAsync`: L1 → L2 → БД, рівні заповнюються на зворотному шляху; ключі `catalog:product:{id}`, `catalog:products:list:v{n}:{hash}` |
+| Інвалідація | після POST/PUT/DELETE/зміни запасу — видалення `catalog:product:{id}` і інкремент версії списків; причина логується |
+| Метрики кешу | Meter `Catalog.Cache`: `cache.hits` / `cache.misses` з тегом `cache.level` = L1/L2 |
+| gRPC-контракти | `Services/*/*.Api/Protos/*.proto` (proto3, package, csharp_namespace); `<Protobuf GrpcServices="Server">` у сервісах, `"Client"` в Aggregator |
+| gRPC-сервіси | `Grpc/*GrpcService.cs` — адаптери над BLL/MediatR; `NotFound` / `InvalidArgument` замість `Internal` |
+| Interceptor | `Platform.ServiceDefaults/Grpc/ServerLoggingInterceptor.cs`: метод, peer, статус, тривалість |
+| Aggregator v2 | `AddGrpcClient` для кожного сервісу (`https://catalog-api`), `Task.WhenAll` з дедлайнами, `Unavailable/DeadlineExceeded` → warning, кеш агрегату в Redis на 45 с (часткові відповіді не кешуються) |
+
+```bash
+curl http://localhost:5000/api/aggregator/v2/products/3          # перший виклик — gRPC, другий — з Redis
+curl http://localhost:5000/api/aggregator/v2/orders/1/details
+```
+
 ## Сервіс Замовлень (Лаб. 02 — ADO.NET + Dapper)
 
 ```
