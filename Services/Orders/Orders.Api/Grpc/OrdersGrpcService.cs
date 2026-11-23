@@ -6,7 +6,8 @@ using Orders.Grpc.V1;
 
 namespace Orders.Api.Grpc;
 
-/// <summary>gRPC-адаптер над BLL Замовлень.</summary>
+/// <summary>gRPC-адаптер над BLL Замовлень. Внутрішній виклик Aggregator: токен IdentityServer (Client Credentials) зі scope orders.read.</summary>
+[Microsoft.AspNetCore.Authorization.Authorize(Policy = "orders.read")]
 public sealed class OrdersGrpcService(IOrderService orders, ICustomerService customers) : OrdersService.OrdersServiceBase
 {
     public override async Task<OrderReply> GetOrder(GetOrderRequest request, ServerCallContext context)

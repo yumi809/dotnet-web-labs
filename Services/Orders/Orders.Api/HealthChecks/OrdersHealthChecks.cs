@@ -8,11 +8,11 @@ public static class OrdersHealthChecks
     /// SQL Server (OrdersDb): легкий SELECT 1, ім'я orders-db, теги database/sql/ready, таймаут 5 с;
     /// gRPC Health Checking Protocol відповідає на основі тих самих перевірок.
     /// </summary>
-    public static IServiceCollection AddOrdersHealthChecks(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddOrdersHealthChecks(this IServiceCollection services, string ordersConnection)
     {
         services.AddHealthChecks()
             .AddSqlServer(
-                connectionString: configuration.GetConnectionString("OrdersDb")!,
+                connectionString: ordersConnection,
                 healthQuery: "SELECT 1;",
                 name: "orders-db",
                 failureStatus: HealthStatus.Unhealthy,
