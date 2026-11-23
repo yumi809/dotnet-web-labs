@@ -9,3 +9,4 @@ TestResults/
 *.log
 appsettings.*.local.json
 **/Pulumi.*.secrets.yaml
+aspire-manifest*.json

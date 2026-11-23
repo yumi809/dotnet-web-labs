@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.idea/
+**/*.user
+.git/
+Platform.AppHost/aspirate-output/
+deploy/
+infra/
+db/
+docs/

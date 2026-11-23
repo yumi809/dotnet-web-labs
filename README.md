@@ -324,6 +324,34 @@ curl -X POST https://localhost:<identityserver-port>/connect/token \
      -d grant_type=client_credentials -d client_id=aggregator -d client_secret=<secret> -d scope="orders.read catalog.read"
 ```
 
+## Розгортання в Kubernetes (Лаб. 10)
+
+### Aspir8 (aspirate) — маніфести всієї платформи
+
+`Platform.AppHost/aspirate-output/` — згенеровано `aspirate` з Aspire-маніфесту AppHost (kustomize): Deployments, Services і
+ConfigMaps (`configMapGenerator`) для всіх сервісів, Gateway, Aggregator, IdentityServer і StatefulSets/Services інфраструктури
+(SQL Server, MongoDB, Redis, RabbitMQ, Keycloak). Секрети з вихідних ConfigMap-ів прибрано — вони підключаються через
+`envFrom.secretRef: <ім'я>-secrets`, команди створення — у [aspirate-output/README.md](Platform.AppHost/aspirate-output/README.md).
+
+### Ручне розгортання — `deploy/k8s/`
+
+| Вимога | Реалізація |
+|---|---|
+| Багатоетапні Dockerfile | `Services/Catalog/Catalog.Api/Dockerfile`, `Platform.ApiGateway/Dockerfile`: збірка в `sdk:10.0`, спершу копіюються `.csproj` і виконується `dotnet restore` окремим шаром, фінальний образ `aspnet:10.0` |
+| Deployment | `*-deployment.yaml`: `replicas: 2`, `imagePullPolicy: IfNotPresent`, `containerPort: 8080`, `livenessProbe /health/live`, `readinessProbe /health/ready` |
+| Service | `*-service.yaml`: `ClusterIP`, selector за лейблом поду, `port 80 → targetPort 8080` — стабільне DNS-ім'я |
+| ConfigMap | `configmap.yaml`: `services__<ім'я>__http__0` з DNS-іменами Service-ів; підключення через `envFrom.configMapRef` |
+| Secrets | поза репозиторієм: `kubectl create secret generic catalog-api-secrets --from-literal=...` ([deploy/k8s/README.md](deploy/k8s/README.md)), підключення `envFrom.secretRef` |
+| Health endpoints | `/health/live` і `/health/ready` реєструються `MapDefaultEndpoints()` **в усіх середовищах** (не лише Development) |
+
+```bash
+docker build -f Services/Catalog/Catalog.Api/Dockerfile -t bookhub/catalog-api:1.0 .
+docker build -f Platform.ApiGateway/Dockerfile -t bookhub/gateway:1.0 .
+kubectl apply -f deploy/k8s/configmap.yaml
+kubectl apply -f deploy/k8s/
+kubectl port-forward svc/gateway 5000:80
+```
+
 ## Сервіс Замовлень (Лаб. 02 — ADO.NET + Dapper)
 
 ```
@@ -465,4 +493,6 @@ Platform.ServiceDefaults/ Platform.ApiGateway/ Platform.Aggregator/ Platform.Eve
 Services/Auth/Auth.Api/      ASP.NET Identity + JWT
 Services/Payments/Payments.Api/  демо-сервіс для перевірки доступу
 infra/keycloak/      Pulumi: realm, clients, ролі
+deploy/k8s/          власні маніфести Kubernetes
+Platform.AppHost/aspirate-output/  маніфести, згенеровані aspirate
 ```

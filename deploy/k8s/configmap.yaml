@@ -1,0 +1,22 @@
+# Несекретна конфігурація платформи: адреси сервісів для service discovery .NET
+# (ключі services__<ім'я>__http__0 → стабільні DNS-імена ClusterIP Service-ів).
+# Секрети (рядки підключення, ключ JWT) — у Secret-ах, створених kubectl create secret (див. README.md).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bookhub-config
+  labels:
+    app.kubernetes.io/part-of: bookhub
+data:
+  ASPNETCORE_ENVIRONMENT: "Production"
+  ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+  Catalog__SeedData: "false"
+  services__orders-api__http__0: "http://orders-api"
+  services__catalog-api__http__0: "http://catalog-api"
+  services__reviews-api__http__0: "http://reviews-api"
+  services__aggregator__http__0: "http://aggregator"
+  services__auth-api__http__0: "http://auth-api"
+  services__payments-api__http__0: "http://payments-api"
+  services__identityserver__http__0: "http://identityserver"
+  services__keycloak__http__0: "http://keycloak:8080"
+  OTEL_SERVICE_NAMESPACE: "bookhub"

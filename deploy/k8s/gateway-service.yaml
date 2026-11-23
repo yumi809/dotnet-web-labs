@@ -1,0 +1,16 @@
+# ClusterIP Service для Gateway; зовнішній доступ — kubectl port-forward svc/gateway 5000:80 (або Ingress)
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  labels:
+    app: gateway
+spec:
+  type: ClusterIP
+  selector:
+    app: gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
