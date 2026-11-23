@@ -4,6 +4,7 @@ using Catalog.Grpc.V1;
 using Orders.Grpc.V1;
 using Grpc.Health.V1;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Platform.Aggregator.Auth;
 using Platform.Aggregator.Clients;
 using Platform.Aggregator.HealthChecks;
 using Platform.Aggregator.Metrics;
@@ -21,20 +22,33 @@ builder.AddRedisDistributedCache("redis");
 
 // Typed HttpClients (REST): логічні імена ресурсів Aspire, схема https+http — спершу https, інакше http.
 // Orders — стандартний обробник із ServiceDefaults; Catalog/Reviews — власні політики за критичністю (Лаб. 07).
-builder.Services.AddHttpClient<OrdersClient>(c => c.BaseAddress = new Uri("https+http://orders-api"));
+// Лаб. 09: Aggregator — клієнт IdentityServer з Client Credentials; токен додається до всіх викликів сервісів
+builder.Services.Configure<AggregatorClientOptions>(builder.Configuration.GetSection(AggregatorClientOptions.SectionName));
+builder.Services.AddHttpClient("identityserver", c => c.BaseAddress = new Uri("https+http://identityserver"));
+builder.Services.AddSingleton<ClientCredentialsTokenProvider>();
+builder.Services.AddTransient<ClientCredentialsTokenHandler>();
+
+builder.Services.AddHttpClient<OrdersClient>(c => c.BaseAddress = new Uri("https+http://orders-api"))
+    .AddHttpMessageHandler<ClientCredentialsTokenHandler>();
 builder.Services.AddHttpClient<CatalogClient>(c => c.BaseAddress = new Uri("https+http://catalog-api"))
+    .AddHttpMessageHandler<ClientCredentialsTokenHandler>()
     .AddCriticalResilience("catalog-http");
 builder.Services.AddHttpClient<ReviewsClient>(c => c.BaseAddress = new Uri("https+http://reviews-api"))
+    .AddHttpMessageHandler<ClientCredentialsTokenHandler>()
     .AddNonCriticalResilience("reviews-http");
 
 // Типізовані gRPC-клієнти для кожного мікросервісу; адреса — логічне ім'я, яке резолвить service discovery.
 // Retry за gRPC-статусами — політикою каналу; HTTP-рівень — ті ж політики за критичністю.
+// gRPC-сервіси вимагають scope-політики (orders.read / catalog.read / reviews.read) — токен Client Credentials.
 builder.Services.AddGrpcClient<OrdersService.OrdersServiceClient>(o => o.Address = new Uri("https://orders-api"))
+    .AddHttpMessageHandler<ClientCredentialsTokenHandler>()
     .WithGrpcRetry(maxAttempts: 3, initialBackoff: TimeSpan.FromSeconds(0.5));
 builder.Services.AddGrpcClient<CatalogService.CatalogServiceClient>(o => o.Address = new Uri("https://catalog-api"))
+    .AddHttpMessageHandler<ClientCredentialsTokenHandler>()
     .WithGrpcRetry(maxAttempts: 4, initialBackoff: TimeSpan.FromSeconds(0.5))
     .AddCriticalResilience("catalog-grpc");
 builder.Services.AddGrpcClient<ReviewsService.ReviewsServiceClient>(o => o.Address = new Uri("https://reviews-api"))
+    .AddHttpMessageHandler<ClientCredentialsTokenHandler>()
     .WithGrpcRetry(maxAttempts: 2, initialBackoff: TimeSpan.FromSeconds(0.2))
     .AddNonCriticalResilience("reviews-grpc");
 
