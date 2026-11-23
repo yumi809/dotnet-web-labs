@@ -1,0 +1,15 @@
+@page
+@model Platform.IdentityServer.Pages.Account.Login.IndexModel
+<h1>Вхід</h1>
+@if (!string.IsNullOrEmpty(Model.Error))
+{
+    <p class="error">@Model.Error</p>
+}
+<form method="post">
+    <input type="hidden" asp-for="Input.ReturnUrl" />
+    <label asp-for="Input.UserName">Логін</label>
+    <input asp-for="Input.UserName" autofocus />
+    <label asp-for="Input.Password">Пароль</label>
+    <input asp-for="Input.Password" type="password" />
+    <button type="submit">Увійти</button>
+</form>
