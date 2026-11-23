@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>BookHub.Keycloak</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Pulumi" Version="3.120.0" />
+    <PackageReference Include="Pulumi.Keycloak" Version="6.15.0" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,7 @@
+name: bookhub-keycloak
+runtime: dotnet
+description: Keycloak realm "bookhub" for the BookHub platform (Lab 09) — resource servers, scopes, roles, clients, test users
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: keycloak-csharp

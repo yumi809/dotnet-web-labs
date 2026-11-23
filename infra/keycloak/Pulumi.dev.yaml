@@ -1,0 +1,10 @@
+# Стек dev: Keycloak з Aspire AppHost (http://localhost:8080).
+# Пароль адміністратора та паролі тестових користувачів НЕ зберігаються у репозиторії — задаються як секрети:
+#   pulumi config set --secret keycloak:password <keycloak-admin-password>
+#   pulumi config set --secret bookhub:testUserPassword <password>
+config:
+  keycloak:url: http://localhost:8080
+  keycloak:clientId: admin-cli
+  keycloak:username: admin
+  keycloak:realm: master
+  bookhub:webAppRedirectUri: http://localhost:5000/*

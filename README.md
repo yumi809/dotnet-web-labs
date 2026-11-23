@@ -1,4 +1,4 @@
-﻿# BookHub — мікросервісна платформа книжкового інтернет-магазину
+# BookHub — мікросервісна платформа книжкового інтернет-магазину
 
 Курс «Технології .NET розробки web-додатків». Один репозиторій на весь курс: кожна лабораторна — окрема гілка `lab-NN`.
 
@@ -257,6 +257,73 @@ curl http://localhost:5000/api/orders/products          # нова назва/ц
 curl "http://localhost:5000/api/reviews?productId=3"    # productName оновлено
 ```
 
+## Аутентифікація та авторизація (Лаб. 09)
+
+### Секрети AppHost
+
+```bash
+dotnet user-secrets set "Parameters:jwt-signing-key" "<random 64 chars>" --project Platform.AppHost
+dotnet user-secrets set "Parameters:aggregator-client-secret" "<secret>" --project Platform.AppHost
+dotnet user-secrets set "Parameters:seed-user-password" "<Passw0rd!>" --project Platform.AppHost
+dotnet user-secrets set "Parameters:keycloak-admin-password" "<admin password>" --project Platform.AppHost
+```
+
+### Частина 1 — Auth Service (ASP.NET Identity + JWT) — `Services/Auth/Auth.Api`
+
+| Вимога | Реалізація |
+|---|---|
+| Окрема база | `IdentityDb` в AppHost; `AuthDbContext : IdentityDbContext<ApplicationUser>`; міграція `Migrations/InitialIdentity` |
+| Identity | `AddIdentity`: пароль ≥ 8 (цифра, великі/малі літери, спецсимвол), lockout 5 спроб / 15 хв, `RequireConfirmedEmail`, унікальний email |
+| JWT | access 15 хв (claims `sub`, `username`, `email`, `role`), refresh 7 днів — у БД лише SHA-256 хеш, `ExpiresAt`, `RevokedAt`; ротація: старий токен відкликається і посилається на новий; повторне використання → відкликання всіх сесій; refresh у **HttpOnly** cookie (`Secure`, `SameSite=Strict`, `Path=/auth`) |
+| Ендпоінти | `POST /auth/register` (роль User), `/auth/login` (access у тілі, refresh у cookie), `/auth/refresh-token`, `/auth/revoke-token`, `/auth/logout` |
+| Email/пароль | `/auth/verify-email`, `/auth/resend-verification` (login без підтвердження → 403), `/auth/forgot-password`, `/auth/reset-password` (одноразовий токен Identity + відкликання refresh-токенів), `/auth/change-password` |
+| Ролі | `User`, `Admin` створюються при старті; `/users` — `[Authorize(Roles = "Admin")]`, `/users/me`, `/users/{id}` — власник (userId з токена) або Admin |
+| Gateway | маршрути `/auth/**` (anonymous) і `/users/**` (authenticated) → `auth-api`; Gateway валідує JWT до проксіювання |
+| Мікросервіси | `AddJwtBearer` + `[Authorize]`; claims у бізнес-логіці: `CreatedBy/ChangedBy` замовлень, автор відгуку (`sub`, `name`) |
+
+### Частина 2 — Duende IdentityServer — `Platform.IdentityServer`
+
+* `AddIdentityServer().AddConfigurationStore().AddOperationalStore().AddAspNetIdentity<ApplicationUser>()`, окрема база
+  `IdentityServerDb`, міграції трьох контекстів (`Migrations/Identity`, `Migrations/Configuration`, `Migrations/PersistedGrant`),
+  сторінки входу/виходу (Quickstart UI, Razor Pages).
+* ApiScopes `orders.read/write`, `catalog.read/write`, `reviews.read/write`, `payments.read/write`; ApiResources
+  `orders-api`, `catalog-api`, `reviews-api`, `payments-api`.
+* Клієнти: **postman** — Authorization Code (+PKCE, секрет); **aggregator** — Client Credentials; **swagger** — public client з PKCE без секрету.
+* Сервіси: `AddJwtBearer("IdentityServer")` з `Authority` (service discovery) і `Audience` = ApiResource; політики за scope
+  (`[Authorize(Policy = "orders.read")]` на gRPC-сервісах). Aggregator отримує токен Client Credentials
+  (`Platform.Aggregator/Auth/ClientCredentialsTokenHandler.cs`) і додає його до HTTP- та gRPC-викликів.
+
+### Частина 3 — Keycloak + Pulumi
+
+* AppHost: `AddKeycloak("keycloak", 8080).WithDataVolume()` (траєкторія А); сервіси отримують `WithReference(keycloak)` і в
+  `Program.cs` налаштовують `AddKeycloakJwtBearer("keycloak", realm: "bookhub")` з audience свого resource server-а.
+* `infra/keycloak` — Pulumi (C#): realm, resource servers `orders-api` / `products-api` / `payments-api` з повним набором scopes,
+  ролі `admin / manager / user / guest` за матрицею (платежі — лише admin), клієнти через extension-методи, тестові
+  користувачі, mapper `authorization.permissions`, outputs. Деталі — [infra/keycloak/README.md](infra/keycloak/README.md).
+* **Permission-based авторизація**: `Platform.ServiceDefaults/Authorization` — `[RequirePermission("orders:read")]`,
+  `PermissionRequirement`, `PermissionAuthorizationHandler` (читає `authorization.permissions`, scopes IdentityServer, ролі за
+  матрицею), `PermissionPolicyProvider`. Атрибут стоїть на **кожному** ендпоінті Orders, Products (Catalog) і Payments.
+
+| Роль | orders | products | payments |
+|---|---|---|---|
+| admin | read, create, update, delete | read, create, update, delete | read, create, refund |
+| manager | read, create, update, delete | read, create, update, delete | — |
+| user | read, create | read | — |
+| guest | — | read | — |
+
+```bash
+# Auth Service
+curl -X POST http://localhost:5000/auth/register -H "Content-Type: application/json" \
+     -d '{"email":"reader@example.com","userName":"reader","fullName":"Reader","password":"Passw0rd!"}'
+curl -X POST http://localhost:5000/auth/login -c cookies.txt -H "Content-Type: application/json" \
+     -d '{"userNameOrEmail":"admin","password":"<seed-user-password>"}'
+curl -X POST http://localhost:5000/auth/refresh-token -b cookies.txt -c cookies.txt
+curl http://localhost:5000/api/orders/1 -H "Authorization: Bearer <access_token>"
+# IdentityServer: токен Aggregator
+curl -X POST https://localhost:<identityserver-port>/connect/token \
+     -d grant_type=client_credentials -d client_id=aggregator -d client_secret=<secret> -d scope="orders.read catalog.read"
+```
+
 ## Сервіс Замовлень (Лаб. 02 — ADO.NET + Dapper)
 
 ```
@@ -394,5 +461,8 @@ Platform.AppHost/    оркестрація Aspire (AppHost.cs)
 Services/Orders/     Проєкт №1 — ADO.NET + Dapper
 Services/Catalog/    Проєкт №2 — EF Core
 Services/Reviews/    Проєкт №3 — Clean Architecture + CQRS + MongoDB
-Platform.ServiceDefaults/ Platform.ApiGateway/ Platform.Aggregator/ Platform.EventBus/
+Platform.ServiceDefaults/ Platform.ApiGateway/ Platform.Aggregator/ Platform.EventBus/ Platform.IdentityServer/
+Services/Auth/Auth.Api/      ASP.NET Identity + JWT
+Services/Payments/Payments.Api/  демо-сервіс для перевірки доступу
+infra/keycloak/      Pulumi: realm, clients, ролі
 ```
