@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using AutoMapper;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
@@ -36,9 +37,12 @@ public sealed class ReviewsController(ISender sender, IMapper mapper) : Controll
     [ProducesResponseType<ReviewDto>(StatusCodes.Status201Created)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    [Microsoft.AspNetCore.Authorization.Authorize]
     public async Task<ActionResult<ReviewDto>> Create([FromBody] CreateReviewRequest request, CancellationToken ct)
     {
-        var id = await sender.Send(mapper.Map<CreateReviewCommand>(request), ct);
+        // Автор — з токена (claims sub / username), а не з тіла запиту
+        var command = mapper.Map<CreateReviewCommand>(request) with { AuthorId = CurrentUserId, AuthorName = CurrentUserName };
+        var id = await sender.Send(command, ct);
         var created = await sender.Send(new GetReviewByIdQuery(id), ct);
         return CreatedAtAction(nameof(GetById), new { id }, created); // Location з рядковим ObjectId
     }
@@ -47,17 +51,21 @@ public sealed class ReviewsController(ISender sender, IMapper mapper) : Controll
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    [Microsoft.AspNetCore.Authorization.Authorize]
     public async Task<IActionResult> Update(string id, [FromBody] UpdateReviewRequest request, CancellationToken ct)
     {
-        await sender.Send(mapper.Map<UpdateReviewCommand>(request) with { Id = id }, ct);
+        // редагувати може лише автор: RequestedBy = userId з токена (перевірка в UpdateReviewHandler)
+        await sender.Send(mapper.Map<UpdateReviewCommand>(request) with { Id = id, RequestedBy = CurrentUserId }, ct);
         return NoContent();
     }
 
     [HttpPost("{id}/comments")]
     [ProducesResponseType(StatusCodes.Status201Created)]
+    [Microsoft.AspNetCore.Authorization.Authorize]
     public async Task<IActionResult> AddComment(string id, [FromBody] AddCommentRequest request, CancellationToken ct)
     {
-        var commentId = await sender.Send(mapper.Map<AddCommentCommand>(request) with { ReviewId = id }, ct);
+        var commentId = await sender.Send(mapper.Map<AddCommentCommand>(request)
+            with { ReviewId = id, AuthorId = CurrentUserId, AuthorName = CurrentUserName }, ct);
         return CreatedAtAction(nameof(GetById), new { id }, new { id = commentId });
     }
 
@@ -70,6 +78,7 @@ public sealed class ReviewsController(ISender sender, IMapper mapper) : Controll
     }
 
     [HttpDelete("{id}")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,admin,manager")]   // модерація відгуків
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(string id, CancellationToken ct)
@@ -77,4 +86,11 @@ public sealed class ReviewsController(ISender sender, IMapper mapper) : Controll
         await sender.Send(new DeleteReviewCommand(id), ct);
         return NoContent();
     }
+
+    private string CurrentUserId =>
+        User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new UnauthorizedAccessException();
+
+    private string CurrentUserName =>
+        User.FindFirstValue("name") is { Length: > 0 } name ? name
+        : User.FindFirstValue("username") ?? User.FindFirstValue("preferred_username") ?? CurrentUserId;
 }

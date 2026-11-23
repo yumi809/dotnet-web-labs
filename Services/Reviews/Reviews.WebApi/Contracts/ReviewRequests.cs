@@ -8,8 +8,9 @@ public sealed class CreateReviewRequest
 {
     [Range(1, long.MaxValue)] public long ProductId { get; set; }
     [Required, StringLength(200)] public string ProductName { get; set; } = string.Empty;
-    [Required, StringLength(64)] public string AuthorId { get; set; } = string.Empty;
-    [Required, StringLength(100)] public string AuthorName { get; set; } = string.Empty;
+    /// <summary>Ігнорується: автор береться з токена.</summary>
+    [StringLength(64)] public string AuthorId { get; set; } = string.Empty;
+    [StringLength(100)] public string AuthorName { get; set; } = string.Empty;
     [Range(1, 5)] public int Rating { get; set; }
     [Required] public string Type { get; set; } = "text";
     [Required, StringLength(150)] public string Title { get; set; } = string.Empty;
@@ -21,7 +22,8 @@ public sealed class CreateReviewRequest
 
 public sealed class UpdateReviewRequest
 {
-    [Required] public string RequestedBy { get; set; } = string.Empty;
+    /// <summary>Ігнорується: береться з токена.</summary>
+    public string RequestedBy { get; set; } = string.Empty;
     [Range(1, 5)] public int Rating { get; set; }
     [Required, StringLength(150)] public string Title { get; set; } = string.Empty;
     [StringLength(4000)] public string? Body { get; set; }
@@ -34,8 +36,8 @@ public sealed class UpdateReviewRequest
 
 public sealed class AddCommentRequest
 {
-    [Required] public string AuthorId { get; set; } = string.Empty;
-    [Required, StringLength(100)] public string AuthorName { get; set; } = string.Empty;
+    public string AuthorId { get; set; } = string.Empty;
+    [StringLength(100)] public string AuthorName { get; set; } = string.Empty;
     [Required, StringLength(1000)] public string Text { get; set; } = string.Empty;
 }
 

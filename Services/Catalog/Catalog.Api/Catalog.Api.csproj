@@ -4,6 +4,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" Version="13.6.5" />
+    <PackageReference Include="Aspire.Keycloak.Authentication" Version="13.6.5-preview.1.26559.7" />
     <PackageReference Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
     <PackageReference Include="AspNetCore.HealthChecks.SqlServer" Version="9.0.0" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.80.0" />

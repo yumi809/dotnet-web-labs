@@ -6,6 +6,7 @@ using Platform.EventBus;
 using Platform.EventBus.Events;
 using Catalog.Api.Infrastructure;
 using Catalog.Api.Metrics;
+using Platform.ServiceDefaults.Authorization;
 using Platform.ServiceDefaults.Grpc;
 using Catalog.Bll;
 using Serilog;
@@ -17,6 +18,20 @@ var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
 
 builder.Services.AddCatalogBll(builder.Configuration); // ConnectionStrings:CatalogDb з AppHost
+
+// ---------- Аутентифікація та авторизація (Лаб. 09) ----------
+// JWT Auth Service + IdentityServer (audience catalog-api) + Keycloak (realm bookhub, resource server products-api)
+builder.AddPlatformAuthentication(audience: "catalog-api")
+    .AddKeycloakJwtBearer(
+        serviceName: "keycloak",
+        realm: PlatformAuthentication.KeycloakRealm,
+        authenticationScheme: PlatformAuthentication.KeycloakScheme,
+        configureOptions: o =>
+        {
+            o.Audience = "products-api";
+            o.RequireHttpsMetadata = false;
+            o.MapInboundClaims = false;
+        });
 
 // L2-кеш: IDistributedCache поверх Redis через Aspire-інтеграцію (ConnectionStrings:redis)
 builder.AddRedisDistributedCache("redis");
@@ -62,6 +77,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 app.MapGrpcService<CatalogGrpcService>();

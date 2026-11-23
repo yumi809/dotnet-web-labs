@@ -10,6 +10,7 @@ namespace Catalog.Api.Grpc;
 /// gRPC-адаптер над BLL: лише валідація вхідних даних, виклик сервісу і перетворення помилок
 /// на коректні статуси (NotFound / InvalidArgument), а не Internal.
 /// </summary>
+[Microsoft.AspNetCore.Authorization.Authorize(Policy = "catalog.read")]   // токен IdentityServer (Aggregator, Client Credentials)
 public sealed class CatalogGrpcService(IProductService products, ILogger<CatalogGrpcService> logger) : CatalogService.CatalogServiceBase
 {
     private const int MaxBatch = 100;

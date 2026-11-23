@@ -9,6 +9,7 @@ using Reviews.Grpc.V1;
 namespace Reviews.WebApi.Grpc;
 
 /// <summary>gRPC-адаптер над CQRS-запитами (ISender). Помилки → NotFound / InvalidArgument.</summary>
+[Microsoft.AspNetCore.Authorization.Authorize(Policy = "reviews.read")]
 public sealed class ReviewsGrpcService(ISender sender) : ReviewsService.ReviewsServiceBase
 {
     public override async Task<ProductRatingReply> GetProductRating(ProductRatingRequest request, ServerCallContext context)

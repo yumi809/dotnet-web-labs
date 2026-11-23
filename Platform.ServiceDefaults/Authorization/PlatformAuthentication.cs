@@ -31,7 +31,8 @@ public static class PlatformAuthentication
     public static readonly string[] Scopes =
         ["orders.read", "orders.write", "catalog.read", "catalog.write", "reviews.read", "reviews.write", "payments.read", "payments.write"];
 
-    public static AuthenticationBuilder AddPlatformAuthentication(this IHostApplicationBuilder builder, string audience)
+    /// <param name="audience">ApiResource сервісу; null — без перевірки audience (Gateway приймає токени для всіх сервісів).</param>
+    public static AuthenticationBuilder AddPlatformAuthentication(this IHostApplicationBuilder builder, string? audience)
     {
         var config = builder.Configuration;
         var jwtIssuer = config["Jwt:Issuer"] ?? "bookhub-auth";
@@ -74,6 +75,7 @@ public static class PlatformAuthentication
                               ?? config["services:identityserver:https:0"]
                               ?? config["services:identityserver:http:0"];
                 o.Audience = audience;
+                o.TokenValidationParameters.ValidateAudience = audience is not null;
                 o.MapInboundClaims = false;
                 o.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
                 o.TokenValidationParameters.NameClaimType = "name";

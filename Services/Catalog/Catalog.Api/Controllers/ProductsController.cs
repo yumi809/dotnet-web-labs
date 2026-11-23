@@ -1,3 +1,4 @@
+using Platform.ServiceDefaults.Authorization;
 using Catalog.Bll.Dto;
 using Catalog.Bll.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -5,27 +6,32 @@ using Microsoft.AspNetCore.Mvc;
 namespace Catalog.Api.Controllers;
 
 [ApiController]
+[Microsoft.AspNetCore.Authorization.Authorize]
 [Route("api/catalog/products")]
 [Produces("application/json")]
 public sealed class ProductsController(IProductService products) : ControllerBase
 {
     /// <summary>Список з пагінацією, фільтрацією і сортуванням (на рівні SQL).</summary>
+    [RequirePermission(Permissions.Products.Read)]
     [HttpGet]
     [ProducesResponseType<PagedResult<ProductListItemDto>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<ProductListItemDto>>> GetPaged([FromQuery] ProductQueryDto query, CancellationToken ct) =>
         Ok(await products.GetPagedAsync(query, ct));
 
+    [RequirePermission(Permissions.Products.Read)]
     [HttpGet("{id:long}")]
     [ProducesResponseType<ProductDto>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ProductDto>> GetById(long id, CancellationToken ct) =>
         Ok(await products.GetAsync(id, ct));
 
+    [RequirePermission(Permissions.Products.Read)]
     [HttpGet("low-stock")]
     public async Task<ActionResult<IReadOnlyList<ProductListItemDto>>> GetLowStock([FromQuery] int threshold = 5, CancellationToken ct = default) =>
         Ok(await products.GetLowStockAsync(threshold, ct));
 
+    [RequirePermission(Permissions.Products.Create)]
     [HttpPost]
     [ProducesResponseType<ProductDto>(StatusCodes.Status201Created)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -36,21 +42,25 @@ public sealed class ProductsController(IProductService products) : ControllerBas
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [RequirePermission(Permissions.Products.Update)]
     [HttpPut("{id:long}")]
     [ProducesResponseType<ProductDto>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ProductDto>> Update(long id, [FromBody] UpdateProductDto dto, CancellationToken ct) =>
         Ok(await products.UpdateAsync(id, dto, ct));
 
+    [RequirePermission(Permissions.Products.Update)]
     [HttpPost("{id:long}/stock/add")]
     public async Task<ActionResult<ProductDto>> AddStock(long id, [FromBody] StockChangeDto dto, CancellationToken ct) =>
         Ok(await products.AddStockAsync(id, dto.Quantity, ct));
 
+    [RequirePermission(Permissions.Products.Update)]
     [HttpPost("{id:long}/stock/remove")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<ProductDto>> RemoveStock(long id, [FromBody] StockChangeDto dto, CancellationToken ct) =>
         Ok(await products.RemoveStockAsync(id, dto.Quantity, ct));
 
+    [RequirePermission(Permissions.Products.Delete)]
     [HttpDelete("{id:long}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
